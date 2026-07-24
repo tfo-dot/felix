@@ -19,6 +19,9 @@ pub enum InputEvent {
     ActiveWindow { class: String, title: String },
     ActiveWindowGeom(ActiveWindowGeometry),
     ActiveWindowGeomNone,
+    DragBegin,
+    DragUpdate { offset_x: f64, offset_y: f64 },
+    DragEnd,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -38,6 +41,7 @@ pub enum AppEvent {
     Tray(TrayAction),
     Tick,
     Petting,
+    Feed { x: f64, y: f64 },
     TrackChanged(String),
     TaskCompleted,
     WeatherChanged(WeatherCondition),

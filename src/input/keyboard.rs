@@ -1,5 +1,5 @@
 use crate::event::{AppEvent, InputEvent};
-use evdev::{Device, EventType};
+use evdev::{Device, KeyCode};
 use std::fs;
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -17,7 +17,11 @@ pub fn spawn_keyboard_tracker(tx: Sender<AppEvent>) {
                 if name_str.starts_with("event") {
                     let path = entry.path();
                     if let Ok(device) = Device::open(&path) {
-                        if device.supported_events().contains(EventType::KEY) {
+                        if device
+                            .supported_keys()
+                            .map(|keys| keys.contains(KeyCode::KEY_A))
+                            .unwrap_or(false)
+                        {
                             log::info!(
                                 "Detected keyboard device: {:?} ({})",
                                 path,

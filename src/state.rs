@@ -44,6 +44,7 @@ pub enum PetState {
     Dancing,
     PortalOut,
     PortalIn,
+    Dragged,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,6 +158,9 @@ pub struct PetAnimationState {
     pub music_playing: bool,
     pub last_task_completed: Option<Instant>,
     pub portal_start: Option<Instant>,
+    pub is_dragging: bool,
+    pub drag_start_x: i32,
+    pub drag_start_y: i32,
 }
 
 impl PetAnimationState {
@@ -174,6 +178,9 @@ impl PetAnimationState {
             music_playing: false,
             last_task_completed: None,
             portal_start: None,
+            is_dragging: false,
+            drag_start_x: 0,
+            drag_start_y: 0,
         }
     }
 
@@ -199,6 +206,12 @@ impl PetAnimationState {
 
     pub fn update_state(&mut self, _config: &Config, cursor_moved_rapidly: Option<(f64, f64)>) {
         let now = Instant::now();
+
+        // 0. Dragging state takes highest precedence
+        if self.is_dragging {
+            self.current_state = PetState::Dragged;
+            return;
+        }
 
         // 0. Portal travel transition takes highest precedence
         if let Some(start) = self.portal_start {
@@ -523,6 +536,10 @@ impl PetAnimationState {
                 self.current_frame = (self.current_frame + 1) % 8;
                 return ((self.current_frame as i32) * frame_size, 0 * frame_size);
             }
+            PetState::Dragged => {
+                self.current_frame = (self.current_frame + 1) % 4;
+                return ((self.current_frame as i32) * frame_size, 3 * frame_size);
+            }
         };
 
         self.current_frame = (self.current_frame + 1) % 4;
@@ -541,6 +558,7 @@ impl PetAnimationState {
             PetState::ClimbingUp | PetState::ClimbingDown => 120,
             PetState::Dancing => 160,
             PetState::PortalOut | PetState::PortalIn => 100,
+            PetState::Dragged => 80,
         }
     }
 }

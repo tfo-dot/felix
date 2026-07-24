@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::event::{AppEvent, TrayAction};
+use crate::event::{AppEvent, InputEvent, TrayAction};
 use crate::state::RoutineState;
 use crate::ui::bubble::SpeechBubble;
 use gtk4::prelude::*;
@@ -61,6 +61,12 @@ pub enum ActiveProp {
     WutheringWaves,
     Reverse1999,
     SublimeKitty,
+    VSCode,
+    Browser,
+    Discord,
+    Minecraft,
+    Steam,
+    Spotify,
 }
 
 #[derive(Clone, Copy)]
@@ -144,22 +150,7 @@ impl PetWindow {
             .build();
         window.add_css_class("pet-window-class");
 
-        // Add click gesture
-        let gesture = gtk4::GestureClick::new();
-        let tx_click = tx.clone();
-        let gesture_clone = gesture.clone();
-        gesture.connect_pressed(move |_, n_press, _x, _y| {
-            let button = gesture_clone.current_button();
-            if button == 1 {
-                // Left Click
-                if n_press == 1 {
-                    let _ = tx_click.send(AppEvent::Tray(TrayAction::TogglePause));
-                } else if n_press == 2 {
-                    let _ = tx_click.send(AppEvent::Tray(TrayAction::ResetTimer));
-                }
-            }
-        });
-        window.add_controller(gesture);
+
 
         // 1. Initialize Layer Shell
         window.init_layer_shell();
@@ -252,6 +243,56 @@ impl PetWindow {
             }
         });
         drawing_area.add_controller(motion);
+
+        // Click & Drag Gestures on DrawingArea
+        let dragged_threshold_crossed = Rc::new(Cell::new(false));
+
+        let drag_gesture = gtk4::GestureDrag::new();
+        let tx_drag = tx.clone();
+        let drag_threshold_clone = dragged_threshold_crossed.clone();
+        drag_gesture.connect_drag_begin(move |_, _, _| {
+            drag_threshold_clone.set(false);
+            let _ = tx_drag.send(AppEvent::Input(InputEvent::DragBegin));
+        });
+
+        let tx_drag_update = tx.clone();
+        let drag_threshold_clone2 = dragged_threshold_crossed.clone();
+        drag_gesture.connect_drag_update(move |_, offset_x, offset_y| {
+            if offset_x.abs() > 4.0 || offset_y.abs() > 4.0 {
+                drag_threshold_clone2.set(true);
+            }
+            let _ = tx_drag_update.send(AppEvent::Input(InputEvent::DragUpdate { offset_x, offset_y }));
+        });
+
+        let tx_drag_end = tx.clone();
+        drag_gesture.connect_drag_end(move |_, _offset_x, _offset_y| {
+            let _ = tx_drag_end.send(AppEvent::Input(InputEvent::DragEnd));
+        });
+        drawing_area.add_controller(drag_gesture);
+
+        let gesture_click = gtk4::GestureClick::new();
+        gesture_click.set_button(0);
+        let tx_click = tx.clone();
+        let gesture_click_clone = gesture_click.clone();
+        let drag_threshold_clone3 = dragged_threshold_crossed.clone();
+        gesture_click.connect_released(move |_, n_press, x, y| {
+            if drag_threshold_clone3.get() {
+                return;
+            }
+            let button = gesture_click_clone.current_button();
+            if button == 1 {
+                if n_press == 1 {
+                    let _ = tx_click.send(AppEvent::Tray(TrayAction::TogglePause));
+                } else if n_press == 2 {
+                    let _ = tx_click.send(AppEvent::Tray(TrayAction::ResetTimer));
+                }
+            } else if button == 2 {
+                let _ = tx_click.send(AppEvent::Feed { x, y });
+            } else if button == 3 {
+                let _ = tx_click.send(AppEvent::Tray(TrayAction::ToggleChecklist));
+            }
+        });
+        drawing_area.add_controller(gesture_click);
 
         if let Some(surf) = surface {
             let frame_coords_clone = frame_coords.clone();
@@ -939,6 +980,165 @@ impl PetWindow {
 
                             cr.restore().unwrap();
                         }
+                        ActiveProp::VSCode => {
+                            cr.save().unwrap();
+                            let bob_y = 4.0 * (elapsed_ms / 300.0).sin();
+                            let tx = 185.0;
+                            let ty = 85.0 + bob_y;
+                            cr.translate(tx, ty);
+
+                            cr.set_source_rgba(0.14, 0.5, 0.85, 1.0); // VS Code Blue
+                            cr.set_line_width(2.0);
+
+                            // Draw ribbon/infinity shape
+                            cr.move_to(-12.0, -8.0);
+                            cr.line_to(12.0, 12.0);
+                            cr.line_to(12.0, -12.0);
+                            cr.line_to(-12.0, 8.0);
+                            cr.line_to(-16.0, 0.0);
+                            cr.close_path();
+                            cr.stroke().unwrap();
+                            
+                            cr.arc(0.0, 0.0, 4.0, 0.0, 2.0 * std::f64::consts::PI);
+                            cr.fill().unwrap();
+
+                            cr.restore().unwrap();
+                        }
+                        ActiveProp::Browser => {
+                            cr.save().unwrap();
+                            let bob_y = 4.0 * (elapsed_ms / 350.0).cos();
+                            let tx = 185.0;
+                            let ty = 85.0 + bob_y;
+                            cr.translate(tx, ty);
+
+                            cr.set_source_rgba(0.2, 0.6, 0.9, 0.85); // Light blue globe
+                            cr.arc(0.0, 0.0, 14.0, 0.0, 2.0 * std::f64::consts::PI);
+                            cr.fill().unwrap();
+
+                            cr.set_source_rgba(0.9, 0.95, 1.0, 0.5);
+                            cr.set_line_width(1.0);
+                            cr.arc(0.0, 0.0, 14.0, 0.0, 2.0 * std::f64::consts::PI);
+                            cr.stroke().unwrap();
+                            cr.move_to(-14.0, 0.0);
+                            cr.line_to(14.0, 0.0);
+                            cr.move_to(0.0, -14.0);
+                            cr.line_to(0.0, 14.0);
+                            cr.stroke().unwrap();
+
+                            cr.restore().unwrap();
+                        }
+                        ActiveProp::Discord => {
+                            cr.save().unwrap();
+                            let bob_y = 4.0 * (elapsed_ms / 280.0).sin();
+                            let tx = 185.0;
+                            let ty = 85.0 + bob_y;
+                            cr.translate(tx, ty);
+
+                            cr.set_source_rgba(0.35, 0.4, 0.9, 1.0); // Discord Purple
+                            cr.arc(0.0, 0.0, 14.0, 0.0, 2.0 * std::f64::consts::PI);
+                            cr.fill().unwrap();
+
+                            // Controller face outline
+                            cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+                            cr.set_line_width(1.5);
+                            cr.arc(-5.0, -1.0, 3.0, 0.0, 2.0 * std::f64::consts::PI);
+                            cr.arc(5.0, -1.0, 3.0, 0.0, 2.0 * std::f64::consts::PI);
+                            cr.fill().unwrap();
+                            
+                            cr.restore().unwrap();
+                        }
+                        ActiveProp::Minecraft => {
+                            cr.save().unwrap();
+                            let bob_y = 3.0 * (elapsed_ms / 400.0).cos();
+                            let tx = 185.0;
+                            let ty = 85.0 + bob_y;
+                            cr.translate(tx, ty);
+
+                            // Isometric dirt/grass block
+                            // Left face
+                            cr.set_source_rgba(0.35, 0.22, 0.15, 1.0);
+                            cr.move_to(0.0, 12.0);
+                            cr.line_to(-12.0, 5.0);
+                            cr.line_to(-12.0, -7.0);
+                            cr.line_to(0.0, 0.0);
+                            cr.close_path();
+                            cr.fill().unwrap();
+
+                            // Right face
+                            cr.set_source_rgba(0.45, 0.28, 0.18, 1.0);
+                            cr.move_to(0.0, 12.0);
+                            cr.line_to(12.0, 5.0);
+                            cr.line_to(12.0, -7.0);
+                            cr.line_to(0.0, 0.0);
+                            cr.close_path();
+                            cr.fill().unwrap();
+
+                            // Top face (grass)
+                            cr.set_source_rgba(0.35, 0.7, 0.25, 1.0);
+                            cr.move_to(0.0, 0.0);
+                            cr.line_to(-12.0, -7.0);
+                            cr.line_to(0.0, -14.0);
+                            cr.line_to(12.0, -7.0);
+                            cr.close_path();
+                            cr.fill().unwrap();
+
+                            cr.restore().unwrap();
+                        }
+                        ActiveProp::Steam => {
+                            cr.save().unwrap();
+                            let bob_y = 4.0 * (elapsed_ms / 300.0).cos();
+                            let tx = 185.0;
+                            let ty = 85.0 + bob_y;
+                            cr.translate(tx, ty);
+
+                            cr.set_source_rgba(0.1, 0.45, 0.7, 1.0); // Steam blue
+                            cr.arc(0.0, 0.0, 14.0, 0.0, 2.0 * std::f64::consts::PI);
+                            cr.fill().unwrap();
+
+                            // Inner piston gear line
+                            cr.set_source_rgba(1.0, 1.0, 1.0, 0.8);
+                            cr.set_line_width(2.0);
+                            cr.move_to(-8.0, 8.0);
+                            cr.line_to(2.0, -2.0);
+                            cr.stroke().unwrap();
+                            cr.arc(2.0, -2.0, 4.0, 0.0, 2.0 * std::f64::consts::PI);
+                            cr.fill().unwrap();
+
+                            cr.restore().unwrap();
+                        }
+                        ActiveProp::Spotify => {
+                            cr.save().unwrap();
+                            let bob_y = 4.0 * (elapsed_ms / 250.0).sin();
+                            let tx = 185.0;
+                            let ty = 85.0 + bob_y;
+                            cr.translate(tx, ty);
+
+                            cr.set_source_rgba(0.1, 0.8, 0.35, 1.0); // Spotify green
+                            cr.arc(0.0, 0.0, 14.0, 0.0, 2.0 * std::f64::consts::PI);
+                            cr.fill().unwrap();
+
+                            // Soundwave arcs
+                            cr.set_source_rgba(0.05, 0.05, 0.05, 0.8);
+                            cr.set_line_width(1.8);
+                            cr.set_line_cap(cairo::LineCap::Round);
+                            
+                            // Top arc
+                            cr.new_sub_path();
+                            cr.arc(0.0, 2.0, 10.0, 210.0 * std::f64::consts::PI / 180.0, 330.0 * std::f64::consts::PI / 180.0);
+                            cr.stroke().unwrap();
+
+                            // Mid arc
+                            cr.new_sub_path();
+                            cr.arc(0.0, 2.0, 7.0, 210.0 * std::f64::consts::PI / 180.0, 330.0 * std::f64::consts::PI / 180.0);
+                            cr.stroke().unwrap();
+
+                            // Small arc
+                            cr.new_sub_path();
+                            cr.arc(0.0, 2.0, 4.0, 210.0 * std::f64::consts::PI / 180.0, 330.0 * std::f64::consts::PI / 180.0);
+                            cr.stroke().unwrap();
+
+                            cr.restore().unwrap();
+                        }
                         _ => {}
                     }
                 }
@@ -1042,6 +1242,34 @@ impl PetWindow {
                         cr.line_to(px - sz * 0.3, py - sz * 0.3);
                         cr.close_path();
                         cr.fill().unwrap();
+                    } else if p.value == 95 {
+                        // Draw the food treat (fish!)
+                        cr.save().unwrap();
+                        cr.set_source_rgba(0.9, 0.5, 0.2, p.alpha); // Orange/brown fish
+                        let px = p.x;
+                        let py = p.y;
+                        let sz = p.size;
+                        cr.translate(px, py);
+                        cr.scale(1.0, 0.6);
+                        cr.arc(0.0, 0.0, sz / 2.0, 0.0, 2.0 * std::f64::consts::PI);
+                        cr.fill().unwrap();
+                        cr.scale(1.0, 1.0 / 0.6); // reset scale
+                        cr.move_to(-sz / 2.0, 0.0);
+                        cr.line_to(-sz, -sz / 3.0);
+                        cr.line_to(-sz, sz / 3.0);
+                        cr.close_path();
+                        cr.fill().unwrap();
+                        cr.set_source_rgba(1.0, 1.0, 1.0, p.alpha);
+                        cr.arc(sz / 4.0, -sz / 8.0, 1.5, 0.0, 2.0 * std::f64::consts::PI);
+                        cr.fill().unwrap();
+                        cr.restore().unwrap();
+                    } else if p.value == 96 {
+                        // Draw crumbs
+                        cr.save().unwrap();
+                        cr.set_source_rgba(0.9, 0.6, 0.3, p.alpha);
+                        cr.arc(p.x, p.y, p.size, 0.0, 2.0 * std::f64::consts::PI);
+                        cr.fill().unwrap();
+                        cr.restore().unwrap();
                     } else {
                         match active {
                             ActiveProp::WutheringWaves => {
@@ -1092,6 +1320,67 @@ impl PetWindow {
                                     5 => "git",
                                     6 => "cat",
                                     _ => "x",
+                                };
+                                cr.show_text(sym).unwrap();
+                            }
+                            ActiveProp::VSCode => {
+                                // Syntax dots (blue, orange, yellow, green)
+                                let colors = [
+                                    (0.2, 0.6, 1.0),
+                                    (1.0, 0.6, 0.2),
+                                    (1.0, 0.8, 0.2),
+                                    (0.4, 0.8, 0.4),
+                                ];
+                                let col = colors[p.value as usize % colors.len()];
+                                cr.set_source_rgba(col.0, col.1, col.2, p.alpha);
+                                cr.arc(p.x, p.y, p.size / 2.0, 0.0, 2.0 * std::f64::consts::PI);
+                                cr.fill().unwrap();
+                            }
+                            ActiveProp::Browser => {
+                                // Binary "0" or "1"
+                                cr.set_source_rgba(0.1, 0.7, 1.0, p.alpha);
+                                cr.select_font_face(
+                                    "Monospace",
+                                    gtk4::cairo::FontSlant::Normal,
+                                    gtk4::cairo::FontWeight::Bold,
+                                );
+                                cr.set_font_size(p.size);
+                                cr.move_to(p.x, p.y);
+                                cr.show_text(if p.value == 0 { "0" } else { "1" }).unwrap();
+                            }
+                            ActiveProp::Discord => {
+                                // Green active circles
+                                cr.set_source_rgba(0.3, 0.8, 0.5, p.alpha * 0.8);
+                                cr.arc(p.x, p.y, p.size / 2.0, 0.0, 2.0 * std::f64::consts::PI);
+                                cr.fill().unwrap();
+                            }
+                            ActiveProp::Minecraft => {
+                                // Green pixel leaves
+                                cr.set_source_rgba(0.4, 0.75, 0.3, p.alpha);
+                                cr.rectangle(p.x, p.y, p.size, p.size);
+                                cr.fill().unwrap();
+                            }
+                            ActiveProp::Steam => {
+                                // White steam puffs (growing circles)
+                                cr.set_source_rgba(0.9, 0.9, 0.95, p.alpha * 0.4);
+                                cr.arc(p.x, p.y, p.size, 0.0, 2.0 * std::f64::consts::PI);
+                                cr.fill().unwrap();
+                            }
+                            ActiveProp::Spotify => {
+                                // Floating spotify green notes
+                                cr.set_source_rgba(0.1, 0.8, 0.35, p.alpha);
+                                cr.select_font_face(
+                                    "Sans",
+                                    gtk4::cairo::FontSlant::Normal,
+                                    gtk4::cairo::FontWeight::Bold,
+                                );
+                                cr.set_font_size(p.size);
+                                cr.move_to(p.x, p.y);
+                                let sym = match p.value % 4 {
+                                    0 => "♩",
+                                    1 => "♪",
+                                    2 => "♫",
+                                    _ => "♬",
                                 };
                                 cr.show_text(sym).unwrap();
                             }

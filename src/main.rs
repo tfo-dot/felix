@@ -3,6 +3,7 @@ mod event;
 mod input;
 mod state;
 mod ui;
+mod interaction;
 
 use config::{load_or_create_config, watch_config};
 use event::{AppEvent, InputEvent, TrayAction, WeatherCondition};
@@ -232,35 +233,13 @@ fn main() {
                                 let class_lower = class.to_lowercase();
                                 let title_lower = title.to_lowercase();
 
-                                let display_text = if class_lower.contains("wuthering") || title_lower.contains("wuthering") ||
-                                                      class_lower.contains("waves") || title_lower.contains("waves") {
-                                    let msgs = [
-                                        "Absorbing Echoes! 🌌",
-                                        "Rover, look out! ⚔️",
-                                        "Time to farm echo substats... 😭",
-                                        "Defeating the Crownless! ⚔️",
-                                    ];
-                                    let idx = gtk4::glib::random_int_range(0, msgs.len() as i32) as usize;
-                                    msgs[idx].to_string()
-                                } else if class_lower.contains("reverse: 1999") || title_lower.contains("reverse: 1999") ||
-                                          class_lower.contains("reverse 1999") || title_lower.contains("reverse1999") ||
-                                          class_lower.contains("reverse:1999") {
-                                    let msgs = [
-                                        "The Storm is coming! 🌧️",
-                                        "Time keeps moving backwards...",
-                                        "Would you like some tea, Vertin? ☕",
-                                        "Regulus is spinning records! 📻",
-                                    ];
-                                    let idx = gtk4::glib::random_int_range(0, msgs.len() as i32) as usize;
-                                    msgs[idx].to_string()
-                                } else if class_lower.contains("sublime") || title_lower.contains("sublime") ||
-                                          class_lower.contains("kitty") || title_lower.contains("kitty") {
-                                    let msgs = [
-                                        "Compile successful! 🚀",
-                                        "Fixing bugs... 🐛",
-                                        "Writing some clean Rust code! 🦀",
-                                        "cat /dev/urandom 🐱",
-                                    ];
+                                let apps = interaction::get_app_interactions();
+                                let display_text = if let Some(app) = apps.iter().find(|app| {
+                                    app.match_patterns.iter().any(|pat| {
+                                        class_lower.contains(pat) || title_lower.contains(pat)
+                                    })
+                                }) {
+                                    let msgs = &app.focus_comments;
                                     let idx = gtk4::glib::random_int_range(0, msgs.len() as i32) as usize;
                                     msgs[idx].to_string()
                                 } else {
@@ -286,10 +265,84 @@ fn main() {
                         InputEvent::ActiveWindowGeomNone => {
                             state.active_window = None;
                         }
+                        InputEvent::DragBegin => {
+                            let (cx, cy) = *current_pos_clone.borrow();
+                            state.drag_start_x = cx as i32;
+                            state.drag_start_y = cy as i32;
+                            state.is_dragging = true;
+                            show_bubble("Whoaaaa! 🙀".to_string(), 2, 2);
+                        }
+                        InputEvent::DragUpdate { offset_x, offset_y } => {
+                            let new_x = state.drag_start_x + offset_x as i32;
+                            let new_y = state.drag_start_y - offset_y as i32;
+                            *current_pos_clone.borrow_mut() = (new_x as f64, new_y as f64);
+                            pet_window_clone.set_position(new_x, new_y);
+                        }
+                        InputEvent::DragEnd => {
+                            state.is_dragging = false;
+
+                            // Snapping check
+                            if current_config.pet.window_interaction && state.active_window.is_some() {
+                                let active_window = state.active_window.as_ref().unwrap();
+                                let pet_size = current_config.pet.size;
+                                let (cx, cy) = *current_pos_clone.borrow();
+                                let target_x = cx as i32;
+                                let target_y = cy as i32;
+                                
+                                let y_diff = (target_y - active_window.y).abs();
+                                let x_diff_left = (target_x - (active_window.x - pet_size + 20)).abs();
+                                let x_diff_right = (target_x - (active_window.x + active_window.width - 20)).abs();
+                                
+                                if y_diff < x_diff_left && y_diff < x_diff_right {
+                                    let x_rel = (target_x - active_window.x).clamp(0, active_window.width - pet_size);
+                                    state.interaction_state = state::InteractionState::Sitting {
+                                        x_rel,
+                                        duration_secs: 8,
+                                        start_time: Instant::now(),
+                                    };
+                                } else if x_diff_left < x_diff_right {
+                                    let y_rel = (target_y - active_window.y).clamp(0, active_window.height - pet_size) as f64;
+                                    state.interaction_state = state::InteractionState::Climbing {
+                                        y_rel,
+                                        target_y_rel: active_window.height - pet_size,
+                                        side: state::ClimbSide::Left,
+                                        dir_down: true,
+                                    };
+                                } else {
+                                    let y_rel = (target_y - active_window.y).clamp(0, active_window.height - pet_size) as f64;
+                                    state.interaction_state = state::InteractionState::Climbing {
+                                        y_rel,
+                                        target_y_rel: active_window.height - pet_size,
+                                        side: state::ClimbSide::Right,
+                                        dir_down: true,
+                                    };
+                                }
+                            }
+                            show_bubble("Safe landing! 🐾".to_string(), 3, 2);
+                        }
                     },
                     AppEvent::Petting => {
                         state.register_petting();
                         show_bubble("Purrr... 💓".to_string(), 3, 2);
+                    }
+                    AppEvent::Feed { x, y } => {
+                        let size_val = current_config.pet.size as f64;
+                        let scale_factor = size_val / 256.0;
+                        let lx = x / scale_factor;
+                        let ly = y / scale_factor;
+
+                        let mut particles = pet_window_clone.prop_particles.borrow_mut();
+                        particles.push(ui::window::PropParticle {
+                            x: lx,
+                            y: ly,
+                            alpha: 1.0,
+                            size: 16.0,
+                            speed_x: 0.0,
+                            speed_y: 0.0,
+                            value: 95,
+                            time: 0.0,
+                        });
+                        show_bubble("Ooh, a treat? 🐠".to_string(), 3, 2);
                     }
                     AppEvent::Tray(tray_action) => match tray_action {
                         TrayAction::TogglePause => {
@@ -322,6 +375,7 @@ fn main() {
                             let new_cfg = load_or_create_config();
                             *config_clone.borrow_mut() = new_cfg.clone();
                             pet_window_clone.update_config(&new_cfg);
+                            *current_pos_clone.borrow_mut() = (0.0, 0.0);
                             show_bubble("Config Reloaded".to_string(), 3, 2);
                         }
                         TrayAction::Quit => {
@@ -438,37 +492,10 @@ fn main() {
                                 if active != ui::window::ActiveProp::None {
                                     let rand_pct = gtk4::glib::random_double();
                                     if rand_pct < 0.05 {
-                                        let msg = match active {
-                                            ui::window::ActiveProp::WutheringWaves => {
-                                                let msgs = [
-                                                    "Checking Echo stats... Max Crit Rate? 🤔",
-                                                    "Rover, let's complete our daily commissions! 📋",
-                                                    "This Tacet Field is active! ⚡",
-                                                    "Listen to the sound of waves... 🌊",
-                                                ];
-                                                msgs[gtk4::glib::random_int_range(0, msgs.len() as i32) as usize]
-                                            }
-                                            ui::window::ActiveProp::Reverse1999 => {
-                                                let msgs = [
-                                                    "Is the rain falling up? 🌧️",
-                                                    "Vertin, Vertin! Look at the spinning pocket watch! 🕰️",
-                                                    "Let's brew some black tea. ☕",
-                                                    "Keep moving, don't get caught in the Storm! 🌪️",
-                                                ];
-                                                msgs[gtk4::glib::random_int_range(0, msgs.len() as i32) as usize]
-                                            }
-                                            ui::window::ActiveProp::SublimeKitty => {
-                                                let msgs = [
-                                                    "Code compiles cleanly! Crab power! 🦀",
-                                                    "Compiling... perfect time for a quick pet? 🥰",
-                                                    "git commit -m 'pet the kitty' 🐾",
-                                                    "Blinking terminal cursor is soothing... 💻",
-                                                ];
-                                                msgs[gtk4::glib::random_int_range(0, msgs.len() as i32) as usize]
-                                            }
-                                            _ => "",
-                                        };
-                                        if !msg.is_empty() {
+                                        let apps = interaction::get_app_interactions();
+                                        if let Some(app) = apps.iter().find(|app| app.prop == active) {
+                                            let msgs = &app.periodic_comments;
+                                            let msg = msgs[gtk4::glib::random_int_range(0, msgs.len() as i32) as usize];
                                             show_bubble(msg.to_string(), 5, 0);
                                         }
                                     }
@@ -609,16 +636,13 @@ fn main() {
                         if let Some(ref win) = state.active_window {
                             let class_lower = win.class.to_lowercase();
                             let title_lower = win.title.to_lowercase();
-                            if class_lower.contains("wuthering") || title_lower.contains("wuthering") ||
-                               class_lower.contains("waves") || title_lower.contains("waves") {
-                                active_prop = ui::window::ActiveProp::WutheringWaves;
-                            } else if class_lower.contains("reverse: 1999") || title_lower.contains("reverse: 1999") ||
-                                      class_lower.contains("reverse 1999") || title_lower.contains("reverse1999") ||
-                                      class_lower.contains("reverse:1999") {
-                                active_prop = ui::window::ActiveProp::Reverse1999;
-                            } else if class_lower.contains("sublime") || title_lower.contains("sublime") ||
-                                      class_lower.contains("kitty") || title_lower.contains("kitty") {
-                                active_prop = ui::window::ActiveProp::SublimeKitty;
+                            let apps = interaction::get_app_interactions();
+                            if let Some(app) = apps.iter().find(|app| {
+                                app.match_patterns.iter().any(|pat| {
+                                    class_lower.contains(pat) || title_lower.contains(pat)
+                                })
+                            }) {
+                                active_prop = app.prop;
                             }
                         }
                         pet_window_clone.active_prop.set(active_prop);
@@ -627,7 +651,9 @@ fn main() {
                         state.update_interaction(&current_config, pet_size, monitor_width);
 
                         // Position the window
-                        if current_config.pet.window_interaction && state.active_window.is_some() {
+                        if state.is_dragging {
+                            // Do nothing, DragUpdate event handles positioning!
+                        } else if current_config.pet.window_interaction && state.active_window.is_some() {
                             let active_window = state.active_window.as_ref().unwrap();
                             let (target_x, target_y) = match &state.interaction_state {
                                 state::InteractionState::Sitting { x_rel, .. } => {
@@ -672,9 +698,21 @@ fn main() {
 
                             pet_window_clone.set_position(new_x as i32, new_y as i32);
                         } else {
-                            *current_pos_clone.borrow_mut() = (0.0, 0.0);
                             *last_monitor_and_win_clone.borrow_mut() = (None, None);
-                            pet_window_clone.reset_position_to_anchor(&current_config);
+                            let (cx, cy) = *current_pos_clone.borrow();
+                            if cx == 0.0 && cy == 0.0 {
+                                pet_window_clone.reset_position_to_anchor(&current_config);
+                            } else {
+                                // Fall back to bottom margin at the dragged X position
+                                let target_x = cx;
+                                let target_y = current_config.anchor.margin_bottom as f64;
+                                let dx = target_x - cx;
+                                let dy = target_y - cy;
+                                let new_x = cx + dx * 0.15;
+                                let new_y = cy + dy * 0.15;
+                                *current_pos_clone.borrow_mut() = (new_x, new_y);
+                                pet_window_clone.set_position(new_x as i32, new_y as i32);
+                            }
                         }
 
                         let tracking_coords = if is_tracking {
@@ -756,6 +794,7 @@ fn main() {
                         {
                             let active = pet_window_clone.active_prop.get();
                             let mut particles = pet_window_clone.prop_particles.borrow_mut();
+                            let mut spawn_crumbs = None;
 
                             // Tick existing particles
                             for p in particles.iter_mut() {
@@ -786,6 +825,24 @@ fn main() {
                                     // Confetti star particle
                                     p.speed_y += 0.12; // gravity
                                     p.alpha -= 0.025;
+                                } else if p.value == 95 {
+                                    // Food treat flying towards Felix's mouth
+                                    let dx = 128.0 - p.x;
+                                    let dy = 135.0 - p.y;
+                                    let dist = (dx*dx + dy*dy).sqrt();
+                                    if dist <= 8.0 {
+                                        p.alpha = 0.0; // reached mouth, delete treat
+                                        spawn_crumbs = Some((p.x, p.y));
+                                    } else {
+                                        let step = 5.0;
+                                        // Move closer to mouth
+                                        p.x += (dx / dist) * step;
+                                        p.y += (dy / dist) * step;
+                                    }
+                                } else if p.value == 96 {
+                                    // Eating crumbs fall down
+                                    p.speed_y += 0.15; // gravity
+                                    p.alpha -= 0.03;   // fade out
                                 } else {
                                     match active {
                                         ui::window::ActiveProp::WutheringWaves => {
@@ -801,6 +858,25 @@ fn main() {
                                             p.x += p.speed_x * 0.1;
                                             p.alpha -= 0.015;
                                         }
+                                        ui::window::ActiveProp::VSCode | ui::window::ActiveProp::Browser => {
+                                            p.alpha -= 0.02;
+                                        }
+                                        ui::window::ActiveProp::Discord => {
+                                            p.alpha -= 0.015;
+                                        }
+                                        ui::window::ActiveProp::Minecraft => {
+                                            if p.y > 256.0 {
+                                                p.alpha = 0.0;
+                                            }
+                                        }
+                                        ui::window::ActiveProp::Steam => {
+                                            p.size += 0.3; // steam grows
+                                            p.alpha -= 0.02;
+                                        }
+                                        ui::window::ActiveProp::Spotify => {
+                                            p.x += p.time.sin() * 0.5;
+                                            p.alpha -= 0.015;
+                                        }
                                         _ => {
                                             p.alpha = 0.0;
                                         }
@@ -810,18 +886,59 @@ fn main() {
 
                             particles.retain(|p| p.alpha > 0.0);
 
-                            // Spawn new particles
+                            // Spawn crumbs if treat was eaten
+                            if let Some((cx, cy)) = spawn_crumbs {
+                                let mut new_particles = Vec::new();
+                                for _ in 0..12 {
+                                    let angle = gtk4::glib::random_double() * 2.0 * std::f64::consts::PI;
+                                    let speed = 1.0 + gtk4::glib::random_double() * 3.0;
+                                    let speed_x = angle.cos() * speed;
+                                    let speed_y = angle.sin() * speed - 1.0;
+                                    let size = 1.5 + gtk4::glib::random_double() * 2.5;
+                                    new_particles.push(ui::window::PropParticle {
+                                        x: cx,
+                                        y: cy,
+                                        alpha: 1.0,
+                                        size,
+                                        speed_x,
+                                        speed_y,
+                                        value: 96,
+                                        time: 0.0,
+                                    });
+                                }
+                                particles.extend(new_particles);
+
+                                // Make Felix happy!
+                                state.register_petting();
+                                let msgs = [
+                                    "Nom nom nom... 🐟 delicious!",
+                                    "Crunch crunch... 🐟 thank you!",
+                                    "Yummy fish! 🐾",
+                                    "Munch munch... 😺 my favorite!",
+                                ];
+                                let idx = gtk4::glib::random_int_range(0, msgs.len() as i32) as usize;
+                                show_bubble(msgs[idx].to_string(), 4, 2);
+                            }
+
+                            // Spawn new particles from registry
                             let rand_val: f64 = gtk4::glib::random_double();
                             if active != ui::window::ActiveProp::None {
-                                match active {
-                                    ui::window::ActiveProp::WutheringWaves => {
-                                        if rand_val < 0.25 {
-                                            let px = 185.0 + (gtk4::glib::random_double() - 0.5) * 35.0;
-                                            let py = 85.0 + (gtk4::glib::random_double() - 0.5) * 35.0;
-                                            let size = 4.0 + gtk4::glib::random_double() * 6.0;
-                                            let speed_y = -0.3 - gtk4::glib::random_double() * 0.8;
-                                            let speed_x = (gtk4::glib::random_double() - 0.5) * 0.6;
-                                            let value = (gtk4::glib::random_int_range(0, 100) % 2) as u8;
+                                let apps = interaction::get_app_interactions();
+                                if let Some(app) = apps.iter().find(|app| app.prop == active) {
+                                    if let Some(ref p_cfg) = app.particle_config {
+                                        if rand_val < p_cfg.spawn_chance {
+                                            let px = p_cfg.spawn_box.0 + gtk4::glib::random_double() * p_cfg.spawn_box.2;
+                                            let py = p_cfg.spawn_box.1 + gtk4::glib::random_double() * p_cfg.spawn_box.3;
+                                             
+                                            let size = p_cfg.size_range.0 + gtk4::glib::random_double() * (p_cfg.size_range.1 - p_cfg.size_range.0);
+                                            let speed_x = p_cfg.speed_x_range.0 + gtk4::glib::random_double() * (p_cfg.speed_x_range.1 - p_cfg.speed_x_range.0);
+                                            let speed_y = p_cfg.speed_y_range.0 + gtk4::glib::random_double() * (p_cfg.speed_y_range.1 - p_cfg.speed_y_range.0);
+                                             
+                                            let p_val = if p_cfg.val_range.1 > p_cfg.val_range.0 {
+                                                gtk4::glib::random_int_range(p_cfg.val_range.0, p_cfg.val_range.1) as u8
+                                            } else {
+                                                p_cfg.val_range.0 as u8
+                                            };
 
                                             particles.push(ui::window::PropParticle {
                                                 x: px,
@@ -830,52 +947,11 @@ fn main() {
                                                 size,
                                                 speed_x,
                                                 speed_y,
-                                                value,
+                                                value: p_val,
                                                 time: 0.0,
                                             });
                                         }
                                     }
-                                    ui::window::ActiveProp::Reverse1999 => {
-                                        if rand_val < 0.35 {
-                                            let px = gtk4::glib::random_double() * 256.0;
-                                            let py = 250.0;
-                                            let size = 10.0 + gtk4::glib::random_double() * 15.0;
-                                            let speed_y = -4.0 - gtk4::glib::random_double() * 4.0;
-
-                                            particles.push(ui::window::PropParticle {
-                                                x: px,
-                                                y: py,
-                                                alpha: 1.0,
-                                                size,
-                                                speed_x: 0.0,
-                                                speed_y,
-                                                value: 0,
-                                                time: 0.0,
-                                            });
-                                        }
-                                    }
-                                    ui::window::ActiveProp::SublimeKitty => {
-                                        if rand_val < 0.15 {
-                                            let px = 100.0 + gtk4::glib::random_double() * 140.0;
-                                            let py = 150.0 + gtk4::glib::random_double() * 50.0;
-                                            let size = 9.0 + gtk4::glib::random_double() * 4.0;
-                                            let speed_y = -0.5 - gtk4::glib::random_double() * 0.7;
-                                            let speed_x = -0.3 - gtk4::glib::random_double() * 0.5;
-                                            let value = gtk4::glib::random_int_range(0, 7) as u8;
-
-                                            particles.push(ui::window::PropParticle {
-                                                x: px,
-                                                y: py,
-                                                alpha: 1.0,
-                                                size,
-                                                speed_x,
-                                                speed_y,
-                                                value,
-                                                time: 0.0,
-                                            });
-                                        }
-                                    }
-                                    _ => {}
                                 }
                             }
 
@@ -945,8 +1021,8 @@ fn main() {
                             .duration_since(*last_frame_time_clone.borrow())
                             .as_millis() as u64;
 
-                        let has_hearts = pet_window_clone.hearts.borrow().is_empty();
-                        let has_prop_particles = pet_window_clone.prop_particles.borrow().is_empty();
+                        let has_hearts = !pet_window_clone.hearts.borrow().is_empty();
+                        let has_prop_particles = !pet_window_clone.prop_particles.borrow().is_empty();
 
                         if elapsed >= state.get_tick_interval() {
                             *last_frame_time_clone.borrow_mut() = now;
