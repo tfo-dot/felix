@@ -321,7 +321,7 @@ impl PetAnimationState {
         let new_address = Some(active_window.address.clone());
         if self.last_win_address != new_address {
             self.last_win_address = new_address;
-            
+
             // Random sitting position
             let max_x = (active_window.width - pet_size).max(0);
             let x_rel = if max_x > 0 {
@@ -355,12 +355,16 @@ impl PetAnimationState {
                     start_time: now,
                 };
             }
-            InteractionState::Sitting { x_rel, duration_secs, start_time } => {
+            InteractionState::Sitting {
+                x_rel,
+                duration_secs,
+                start_time,
+            } => {
                 let x_rel = x_rel.clamp(0, (win_w - pet_size).max(0));
-                
+
                 if now.duration_since(start_time) >= Duration::from_secs(duration_secs as u64) {
                     let r = gtk4::glib::random_double();
-                    
+
                     let win_x = active_window.x;
                     let left_space = win_x > pet_size;
                     let right_space = win_x + win_w + pet_size < monitor_width;
@@ -379,7 +383,11 @@ impl PetAnimationState {
                         };
                     } else if r < 0.80 && (left_space || right_space) {
                         let side = if left_space && right_space {
-                            if gtk4::glib::random_double() < 0.5 { ClimbSide::Left } else { ClimbSide::Right }
+                            if gtk4::glib::random_double() < 0.5 {
+                                ClimbSide::Left
+                            } else {
+                                ClimbSide::Right
+                            }
                         } else if left_space {
                             ClimbSide::Left
                         } else {
@@ -401,10 +409,18 @@ impl PetAnimationState {
                         };
                     }
                 } else {
-                    self.interaction_state = InteractionState::Sitting { x_rel, duration_secs, start_time };
+                    self.interaction_state = InteractionState::Sitting {
+                        x_rel,
+                        duration_secs,
+                        start_time,
+                    };
                 }
             }
-            InteractionState::Walking { mut x_rel, target_x_rel, dir_right: _ } => {
+            InteractionState::Walking {
+                mut x_rel,
+                target_x_rel,
+                dir_right: _,
+            } => {
                 let max_x = (win_w - pet_size).max(0);
                 let target_x_rel = target_x_rel.clamp(0, max_x);
                 x_rel = x_rel.clamp(0.0, max_x as f64);
@@ -426,7 +442,12 @@ impl PetAnimationState {
                     };
                 }
             }
-            InteractionState::Climbing { mut y_rel, target_y_rel, side, dir_down } => {
+            InteractionState::Climbing {
+                mut y_rel,
+                target_y_rel,
+                side,
+                dir_down,
+            } => {
                 let max_y = (win_h - pet_size).max(0);
                 let target_y_rel = target_y_rel.clamp(0, max_y);
                 y_rel = y_rel.clamp(0.0, max_y as f64);

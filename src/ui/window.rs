@@ -6,7 +6,7 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
-use std::fs::{self, File};
+use std::fs;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
@@ -27,8 +27,16 @@ pub fn load_tasks() -> Vec<TaskItem> {
     let path = get_tasks_path();
     if !path.exists() {
         return vec![
-            TaskItem { id: "1".into(), text: "Focus on coding 🦀".into(), completed: false },
-            TaskItem { id: "2".into(), text: "Pet Felix for good luck! 🐾".into(), completed: false },
+            TaskItem {
+                id: "1".into(),
+                text: "Focus on coding 🦀".into(),
+                completed: false,
+            },
+            TaskItem {
+                id: "2".into(),
+                text: "Pet Felix for good luck! 🐾".into(),
+                completed: false,
+            },
         ];
     }
     fs::read_to_string(&path)
@@ -94,8 +102,38 @@ pub struct PetWindow {
     pub checklist_card: gtk4::Box,
     #[allow(dead_code)]
     pub tasks: Rc<RefCell<Vec<TaskItem>>>,
-    pub current_weather: Rc<RefCell<String>>,
+    pub current_weather: Rc<RefCell<crate::event::WeatherCondition>>,
     pub current_routine: Rc<RefCell<RoutineState>>,
+}
+
+const PET_SPRITESHEET_BYTES: &[u8] = include_bytes!("../../assets/pet_spritesheet.png");
+const WUTHERING_TERMINAL_BYTES: &[u8] = include_bytes!("../../assets/wuthering_terminal.png");
+
+fn load_surface(
+    file_path: &str,
+    embedded_bytes: &'static [u8],
+) -> Option<gtk4::cairo::ImageSurface> {
+    // Try local file first
+    if let Ok(mut file) = std::fs::File::open(file_path) {
+        log::info!("Loading asset from filesystem: {}", file_path);
+        match gtk4::cairo::ImageSurface::create_from_png(&mut file) {
+            Ok(surf) => return Some(surf),
+            Err(e) => {
+                log::error!("Failed to parse PNG from {}: {:?}", file_path, e);
+            }
+        }
+    }
+
+    // Fallback to embedded bytes
+    log::info!("Loading embedded asset for {}", file_path);
+    let mut cursor = std::io::Cursor::new(embedded_bytes);
+    match gtk4::cairo::ImageSurface::create_from_png(&mut cursor) {
+        Ok(surf) => Some(surf),
+        Err(e) => {
+            log::error!("Failed to parse embedded PNG for {}: {:?}", file_path, e);
+            None
+        }
+    }
 }
 
 impl PetWindow {
@@ -142,34 +180,11 @@ impl PetWindow {
         update_window_properties(&window, config);
 
         // 2. Load the processed sprite sheet as a Cairo surface
-        let surface = match File::open("assets/pet_spritesheet.png") {
-            Ok(mut file) => match gtk4::cairo::ImageSurface::create_from_png(&mut file) {
-                Ok(surf) => Some(surf),
-                Err(e) => {
-                    eprintln!("Failed to parse PNG sprite sheet: {:?}", e);
-                    None
-                }
-            },
-            Err(e) => {
-                eprintln!("Failed to open sprite sheet: {:?}", e);
-                None
-            }
-        };
+        let surface = load_surface("assets/pet_spritesheet.png", PET_SPRITESHEET_BYTES);
 
         // Load the wuthering waves terminal gourd asset
-        let wuthering_surface = match File::open("assets/wuthering_terminal.png") {
-            Ok(mut file) => match gtk4::cairo::ImageSurface::create_from_png(&mut file) {
-                Ok(surf) => Some(surf),
-                Err(e) => {
-                    eprintln!("Failed to parse PNG wuthering terminal: {:?}", e);
-                    None
-                }
-            },
-            Err(e) => {
-                eprintln!("Failed to open wuthering terminal: {:?}", e);
-                None
-            }
-        };
+        let wuthering_surface =
+            load_surface("assets/wuthering_terminal.png", WUTHERING_TERMINAL_BYTES);
 
         // Shared state for frame coordinates and sizing
         let frame_coords = Rc::new(RefCell::new((0, 0)));
@@ -178,7 +193,7 @@ impl PetWindow {
         let hearts = Rc::new(RefCell::new(Vec::<Heart>::new()));
         let current_pet_state = Rc::new(Cell::new(crate::state::PetState::Idle));
         let active_prop = Rc::new(Cell::new(ActiveProp::None));
-        let current_weather = Rc::new(RefCell::new(config.weather.clone()));
+        let current_weather = Rc::new(RefCell::new(crate::event::WeatherCondition::Unknown));
         let current_routine = Rc::new(RefCell::new(RoutineState::None));
         let prop_particles = Rc::new(RefCell::new(Vec::<PropParticle>::new()));
 
@@ -329,7 +344,7 @@ impl PetWindow {
                     cr.save().unwrap();
                     let vortex_max_radius = 45.0;
                     let vortex_radius;
-                    
+
                     if current_state == PetState::PortalOut {
                         if frame_idx <= 2 {
                             let progress = frame_idx as f64 / 2.0;
@@ -351,28 +366,33 @@ impl PetWindow {
                             vortex_radius = progress * vortex_max_radius;
                         }
                     }
-                    
+
                     if vortex_radius > 0.0 {
                         cr.translate(128.0, 165.0);
                         cr.scale(1.0, 0.35);
-                        
+
                         let rad_grad = cairo::RadialGradient::new(
-                            0.0, 0.0, vortex_radius * 0.2,
-                            0.0, 0.0, vortex_radius
+                            0.0,
+                            0.0,
+                            vortex_radius * 0.2,
+                            0.0,
+                            0.0,
+                            vortex_radius,
                         );
                         rad_grad.add_color_stop_rgba(0.0, 0.1, 0.0, 0.3, 0.8);
                         rad_grad.add_color_stop_rgba(0.5, 0.6, 0.2, 0.9, 0.95);
                         rad_grad.add_color_stop_rgba(0.9, 0.2, 0.5, 1.0, 0.9);
                         rad_grad.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.0);
-                        
+
                         cr.set_source(&rad_grad).unwrap();
                         cr.rotate(elapsed_ms * 0.007);
                         cr.arc(0.0, 0.0, vortex_radius, 0.0, 2.0 * std::f64::consts::PI);
                         cr.fill().unwrap();
-                        
+
                         cr.set_source_rgba(0.9, 0.8, 1.0, 0.9);
                         for i in 0..4 {
-                            let angle = (i as f64 * std::f64::consts::PI / 2.0) + (elapsed_ms * 0.005);
+                            let angle =
+                                (i as f64 * std::f64::consts::PI / 2.0) + (elapsed_ms * 0.005);
                             let sx = angle.cos() * (vortex_radius * 0.6);
                             let sy = angle.sin() * (vortex_radius * 0.6);
                             cr.arc(sx, sy, 3.0, 0.0, 2.0 * std::f64::consts::PI);
@@ -400,7 +420,9 @@ impl PetWindow {
                 cr.paint_with_alpha(portal_opacity).unwrap();
 
                 // Draw accessories that attach to the pet (bobbing and rotating with it)
-                let hour = gtk4::glib::DateTime::now_local().map(|dt| dt.hour()).unwrap_or(12);
+                let hour = gtk4::glib::DateTime::now_local()
+                    .map(|dt| dt.hour())
+                    .unwrap_or(12);
                 let is_night = hour >= 21 || hour < 6;
                 // 1. Draw Nightcap if it is night and pet is sleeping
                 if is_night && current_state == PetState::Sleeping {
@@ -429,8 +451,8 @@ impl PetWindow {
                 }
 
                 // 2. Draw Sunglasses if weather is sunny
-                let weather = current_weather_clone.borrow().to_lowercase();
-                if weather == "sunny" {
+                let weather = current_weather_clone.borrow();
+                if *weather == crate::event::WeatherCondition::Sunny {
                     cr.save().unwrap();
                     cr.set_source_rgba(0.12, 0.12, 0.12, 0.95); // dark lenses
 
@@ -468,7 +490,7 @@ impl PetWindow {
                 }
 
                 // 3. Draw Scarf if weather is snowy
-                if weather == "snowy" {
+                if *weather == crate::event::WeatherCondition::Snowy {
                     cr.save().unwrap();
                     cr.set_source_rgba(0.85, 0.15, 0.15, 1.0); // Red scarf
 
@@ -493,7 +515,7 @@ impl PetWindow {
                 }
 
                 // 4. Draw Umbrella if weather is rainy
-                if weather == "rainy" {
+                if *weather == crate::event::WeatherCondition::Rainy {
                     cr.save().unwrap();
 
                     // Stick
@@ -532,10 +554,16 @@ impl PetWindow {
                             cr.set_source_rgba(0.95, 0.95, 0.95, 1.0);
                             cr.rectangle(84.0, 142.0, 16.0, 18.0);
                             cr.fill().unwrap();
-                            
-                            cr.arc(84.0, 151.0, 4.0, 90.0 * std::f64::consts::PI / 180.0, 270.0 * std::f64::consts::PI / 180.0);
+
+                            cr.arc(
+                                84.0,
+                                151.0,
+                                4.0,
+                                90.0 * std::f64::consts::PI / 180.0,
+                                270.0 * std::f64::consts::PI / 180.0,
+                            );
                             cr.stroke().unwrap();
-                            
+
                             cr.set_source_rgba(0.45, 0.25, 0.15, 1.0);
                             cr.save().unwrap();
                             cr.translate(92.0, 142.0);
@@ -543,7 +571,7 @@ impl PetWindow {
                             cr.arc(0.0, 0.0, 7.0, 0.0, 2.0 * std::f64::consts::PI);
                             cr.fill().unwrap();
                             cr.restore().unwrap();
-                            
+
                             cr.set_source_rgba(0.9, 0.9, 0.9, 0.65);
                             cr.set_line_width(1.2);
                             let time_factor = elapsed_ms * 0.006;
@@ -551,53 +579,56 @@ impl PetWindow {
                                 let sx = 89.0 + (i as f64 * 6.0);
                                 cr.move_to(sx, 137.0);
                                 cr.curve_to(
-                                    sx + (time_factor + i as f64).sin() * 2.0, 131.0,
-                                    sx - (time_factor + i as f64).sin() * 2.0, 126.0,
-                                    sx, 120.0
+                                    sx + (time_factor + i as f64).sin() * 2.0,
+                                    131.0,
+                                    sx - (time_factor + i as f64).sin() * 2.0,
+                                    126.0,
+                                    sx,
+                                    120.0,
                                 );
                                 cr.stroke().unwrap();
                             }
-                            
+
                             cr.restore().unwrap();
                         }
                         RoutineState::Lunch => {
                             cr.save().unwrap();
-                            
+
                             cr.set_source_rgba(0.85, 0.7, 0.5, 1.0);
                             cr.move_to(84.0, 160.0);
                             cr.line_to(102.0, 160.0);
                             cr.line_to(93.0, 144.0);
                             cr.close_path();
                             cr.fill().unwrap();
-                            
+
                             cr.set_source_rgba(0.3, 0.8, 0.2, 1.0);
                             cr.set_line_width(3.0);
                             cr.move_to(86.0, 158.0);
                             cr.line_to(100.0, 158.0);
                             cr.stroke().unwrap();
-                            
+
                             cr.set_source_rgba(0.9, 0.2, 0.2, 1.0);
                             cr.set_line_width(2.0);
                             cr.move_to(89.0, 156.0);
                             cr.line_to(97.0, 156.0);
                             cr.stroke().unwrap();
-                            
+
                             cr.set_source_rgba(0.9, 0.75, 0.55, 1.0);
                             cr.move_to(86.0, 160.0);
                             cr.line_to(104.0, 160.0);
                             cr.line_to(95.0, 146.0);
                             cr.close_path();
                             cr.fill().unwrap();
-                            
+
                             cr.restore().unwrap();
                         }
                         RoutineState::Reading => {
                             cr.save().unwrap();
-                            
+
                             cr.set_source_rgba(0.5, 0.25, 0.1, 1.0);
                             cr.rectangle(110.0, 152.0, 36.0, 10.0);
                             cr.fill().unwrap();
-                            
+
                             cr.set_source_rgba(0.96, 0.96, 0.96, 1.0);
                             cr.move_to(128.0, 152.0);
                             cr.curve_to(123.0, 148.0, 116.0, 148.0, 112.0, 152.0);
@@ -605,25 +636,37 @@ impl PetWindow {
                             cr.curve_to(116.0, 156.0, 123.0, 156.0, 128.0, 160.0);
                             cr.close_path();
                             cr.fill().unwrap();
-                            
+
                             cr.move_to(128.0, 152.0);
                             cr.curve_to(133.0, 148.0, 140.0, 148.0, 144.0, 152.0);
                             cr.line_to(144.0, 160.0);
                             cr.curve_to(140.0, 156.0, 133.0, 156.0, 128.0, 160.0);
                             cr.close_path();
                             cr.fill().unwrap();
-                            
+
                             cr.set_source_rgba(0.2, 0.2, 0.2, 0.8);
                             cr.set_line_width(1.0);
-                            
-                            cr.move_to(115.0, 152.0); cr.line_to(123.0, 152.0); cr.stroke().unwrap();
-                            cr.move_to(114.0, 154.0); cr.line_to(124.0, 154.0); cr.stroke().unwrap();
-                            cr.move_to(115.0, 156.0); cr.line_to(121.0, 156.0); cr.stroke().unwrap();
-                            
-                            cr.move_to(133.0, 152.0); cr.line_to(141.0, 152.0); cr.stroke().unwrap();
-                            cr.move_to(132.0, 154.0); cr.line_to(142.0, 154.0); cr.stroke().unwrap();
-                            cr.move_to(135.0, 156.0); cr.line_to(141.0, 156.0); cr.stroke().unwrap();
-                            
+
+                            cr.move_to(115.0, 152.0);
+                            cr.line_to(123.0, 152.0);
+                            cr.stroke().unwrap();
+                            cr.move_to(114.0, 154.0);
+                            cr.line_to(124.0, 154.0);
+                            cr.stroke().unwrap();
+                            cr.move_to(115.0, 156.0);
+                            cr.line_to(121.0, 156.0);
+                            cr.stroke().unwrap();
+
+                            cr.move_to(133.0, 152.0);
+                            cr.line_to(141.0, 152.0);
+                            cr.stroke().unwrap();
+                            cr.move_to(132.0, 154.0);
+                            cr.line_to(142.0, 154.0);
+                            cr.stroke().unwrap();
+                            cr.move_to(135.0, 156.0);
+                            cr.line_to(141.0, 156.0);
+                            cr.stroke().unwrap();
+
                             cr.restore().unwrap();
                         }
                         _ => {}
@@ -1114,9 +1157,7 @@ impl PetWindow {
                     .spacing(6)
                     .build();
 
-                let check = gtk4::CheckButton::builder()
-                    .active(item.completed)
-                    .build();
+                let check = gtk4::CheckButton::builder().active(item.completed).build();
 
                 let label = gtk4::Label::builder()
                     .label(&item.text)
@@ -1197,9 +1238,7 @@ impl PetWindow {
                         .spacing(6)
                         .build();
 
-                    let check = gtk4::CheckButton::builder()
-                        .active(false)
-                        .build();
+                    let check = gtk4::CheckButton::builder().active(false).build();
 
                     let label = gtk4::Label::builder()
                         .label(&text)
@@ -1408,7 +1447,7 @@ impl PetWindow {
         self.prop_overlay
             .set_size_request(config.pet.size, config.pet.size);
         self.checklist_card.set_visible(config.checklist_visible);
-        *self.current_weather.borrow_mut() = config.weather.clone();
+        *self.current_weather.borrow_mut() = crate::event::WeatherCondition::Unknown;
         self.window.queue_resize();
         self.drawing_area.queue_draw();
         self.prop_overlay.queue_draw();
@@ -1439,4 +1478,21 @@ pub fn update_window_properties(window: &gtk4::ApplicationWindow, config: &Confi
     window.set_margin(Edge::Right, config.anchor.margin_right);
     window.set_margin(Edge::Top, config.anchor.margin_top);
     window.set_margin(Edge::Left, config.anchor.margin_left);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_surface_embedded_fallback() {
+        // Initialize logging so we can see the fallback log messages if they print to stderr
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let surface = load_surface("non_existent_file.png", PET_SPRITESHEET_BYTES);
+        assert!(surface.is_some());
+
+        let surface_wuthering = load_surface("non_existent_file.png", WUTHERING_TERMINAL_BYTES);
+        assert!(surface_wuthering.is_some());
+    }
 }

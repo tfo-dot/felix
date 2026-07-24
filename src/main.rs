@@ -5,14 +5,16 @@ mod state;
 mod ui;
 
 use config::{load_or_create_config, watch_config};
-use event::{AppEvent, InputEvent, TrayAction};
+use event::{AppEvent, InputEvent, TrayAction, WeatherCondition};
+use gtk4_layer_shell::LayerShell;
 #[cfg(feature = "hyprland")]
-use input::hyprland::{spawn_cursor_poller, spawn_event_listener, spawn_active_window_poller};
+use input::hyprland::{spawn_active_window_poller, spawn_cursor_poller, spawn_event_listener};
 use input::keyboard::spawn_keyboard_tracker;
+use reqwest::Url;
+use reqwest::blocking::Client;
 use state::{PetAnimationState, PetState, PomodoroState, PomodoroTimer};
 use ui::tray::spawn_tray;
 use ui::window::PetWindow;
-use gtk4_layer_shell::LayerShell;
 
 use gtk4::prelude::*;
 use std::cell::RefCell;
@@ -20,6 +22,25 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    log::info!("Starting Felix Desktop Pet...");
+
+    let mut retry_count = 0;
+    while let Err(e) = gtk4::init() {
+        if retry_count >= 10 {
+            log::error!("Could not initialize GTK after 10 attempts: {:?}", e);
+            std::process::exit(1);
+        }
+        log::warn!(
+            "Wayland/X11 display not ready yet (attempt {}/10): {:?}. Retrying in 1 second...",
+            retry_count + 1,
+            e
+        );
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        retry_count += 1;
+    }
+    log::info!("GTK initialized successfully.");
+
     let app = gtk4::Application::builder()
         .application_id("org.felix.desktop-pet")
         .build();
@@ -36,27 +57,29 @@ fn main() {
                 spawn_cursor_poller(tx.clone());
                 spawn_active_window_poller(tx.clone());
             } else {
-                println!("Hyprland is not running. Disabling window interaction and active window polling.");
+                log::warn!("Hyprland is not running. Disabling window interaction and active window polling.");
             }
         }
+
         #[cfg(not(feature = "hyprland"))]
         {
-            println!("Hyprland support compiled out. Disabling window interaction and active window polling.");
+            log::info!("Hyprland support compiled out. Disabling window interaction and active window polling.");
         }
 
         spawn_keyboard_tracker(tx.clone());
 
-        let weather_sync = std::sync::Arc::new(std::sync::RwLock::new(config.borrow().weather.clone()));
-        let weather_sync_poller = weather_sync.clone();
+        let ha_addres = std::sync::Arc::new(std::sync::RwLock::new(config.borrow().ha_address.clone()));
+        let ha_addres_poller = ha_addres.clone();
+
+        let ha_key = std::sync::Arc::new(std::sync::RwLock::new(config.borrow().ha_key.clone()));
+        let ha_key_poller = ha_key.clone();
 
         let tx_media = tx.clone();
         std::thread::spawn(move || {
             let mut last_track = String::new();
             let mut last_weather_fetch = Instant::now() - Duration::from_secs(1800);
-            let mut current_weather_val = String::new();
 
             loop {
-                // 1. Music Checking (playerctl)
                 let mut is_playing = false;
                 let mut track_info = String::new();
 
@@ -97,46 +120,20 @@ fn main() {
                     }
                 }
 
-                // 2. Weather Checking
-                let weather_cfg = if let Ok(w) = weather_sync_poller.read() {
-                    w.clone()
-                } else {
-                    "auto".to_string()
-                };
-
-                if weather_cfg.to_lowercase() == "auto" {
+                if ha_addres.read().is_ok_and(|r| !r.is_empty()) {
                     if last_weather_fetch.elapsed() > Duration::from_secs(600) {
-                        last_weather_fetch = Instant::now();
-                        let output = std::process::Command::new("curl")
-                            .args(&["-s", "--max-time", "5", "https://wttr.in/?format=%C"])
-                            .output();
-                        if let Ok(out) = output {
-                            if out.status.success() {
-                                let cond = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
-                                let resolved = if cond.contains("rain") || cond.contains("drizzle") || cond.contains("shower") {
-                                    "rainy".to_string()
-                                } else if cond.contains("snow") || cond.contains("flurries") || cond.contains("ice") {
-                                    "snowy".to_string()
-                                } else if cond.contains("wind") || cond.contains("gale") {
-                                    "windy".to_string()
-                                } else if cond.contains("sun") || cond.contains("clear") {
-                                    "sunny".to_string()
-                                } else {
-                                    "sunny".to_string()
-                                };
+                        let url = Url::parse(&ha_addres_poller.read().unwrap()).expect("The HA url should be valid url if provided");
 
-                                if resolved != current_weather_val {
-                                    current_weather_val = resolved.clone();
-                                    let _ = tx_media.send(AppEvent::WeatherChanged(resolved));
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // Manual config override
-                    if weather_cfg != current_weather_val {
-                        current_weather_val = weather_cfg.clone();
-                        let _ = tx_media.send(AppEvent::WeatherChanged(weather_cfg));
+                        let response = Client::new()
+                        .get(url)
+                        .header("Authorization", format!("Bearer {}", ha_key_poller.read().unwrap()))
+                        .header("Content-Type", "application/json").send();
+
+                        let weather = response.expect("Home Assistant down").json::<event::WeatherState>().expect("Request didn't go through to HA API");
+
+                        last_weather_fetch = Instant::now();
+
+                        let _ = tx_media.send(AppEvent::WeatherChanged(weather.state));
                     }
                 }
 
@@ -151,14 +148,11 @@ fn main() {
 
         Box::leak(Box::new(_watcher));
 
-        // 6. Spawn system tray icon
         let tray_handle = spawn_tray(tx.clone());
 
-        // 7. Create UI Window
         let pet_window = Rc::new(PetWindow::new(app, &config.borrow(), tx.clone()));
         pet_window.window.present();
 
-        // 8. Initialize states
         let pet_state = Rc::new(RefCell::new(PetAnimationState::new()));
         let pomodoro = Rc::new(RefCell::new(PomodoroTimer::new(&config.borrow())));
 
@@ -173,33 +167,26 @@ fn main() {
         let last_resolved_monitor = Rc::new(RefCell::new(None::<gtk4::gdk::Monitor>));
         let pending_monitor = Rc::new(RefCell::new(None::<gtk4::gdk::Monitor>));
 
-        // Show welcome message if Pomodoro starts paused
         if config.borrow().pomodoro.start_paused {
-            *bubble_text.borrow_mut() =
-                "Hi! I'm Felix. Click me to start the timer! 🐾".to_string();
+            *bubble_text.borrow_mut() = "Hi! I'm Felix. Click me to start the timer! 🐾".to_string();
             *bubble_timeout.borrow_mut() = 10;
             *bubble_priority.borrow_mut() = 0;
         }
 
-        // 9. Start timer tickers
-        // Animation ticker (every ~30ms to allow fine-grained state checking)
         let tx_tick_anim = tx.clone();
         gtk4::glib::timeout_add_local(Duration::from_millis(30), move || {
             let _ = tx_tick_anim.send(AppEvent::Tick);
             gtk4::glib::ControlFlow::Continue
         });
 
-        // Pomodoro second-by-second ticker (every 1s)
         let tx_tick_pomo = tx.clone();
         gtk4::glib::timeout_add_local(Duration::from_secs(1), move || {
             let _ = tx_tick_pomo.send(AppEvent::Tick);
             gtk4::glib::ControlFlow::Continue
         });
 
-        // 10. Handle incoming events on the UI thread via GLib timeout draining loop
         let pet_window_clone = pet_window.clone();
         let config_clone = config.clone();
-        let weather_sync_ui = weather_sync.clone();
         let pet_state_clone = pet_state.clone();
         let pomodoro_clone = pomodoro.clone();
         let last_cursor_pos_clone = last_cursor_pos.clone();
@@ -234,7 +221,6 @@ fn main() {
                     }
                 };
 
-
                 match event {
                     AppEvent::Input(input_event) => match input_event {
                         InputEvent::Typing => {
@@ -245,7 +231,7 @@ fn main() {
                             if !class.is_empty() {
                                 let class_lower = class.to_lowercase();
                                 let title_lower = title.to_lowercase();
-                                
+
                                 let display_text = if class_lower.contains("wuthering") || title_lower.contains("wuthering") ||
                                                       class_lower.contains("waves") || title_lower.contains("waves") {
                                     let msgs = [
@@ -335,14 +321,15 @@ fn main() {
                         TrayAction::ReloadConfig => {
                             let new_cfg = load_or_create_config();
                             *config_clone.borrow_mut() = new_cfg.clone();
-                            if let Ok(mut w) = weather_sync_ui.write() {
-                                *w = new_cfg.weather.clone();
-                            }
                             pet_window_clone.update_config(&new_cfg);
                             show_bubble("Config Reloaded".to_string(), 3, 2);
                         }
                         TrayAction::Quit => {
-                            std::process::exit(0);
+                           std::process::exit(0)
+                        }
+                        TrayAction::TogglePetVisibility => {
+                            let is_visible = pet_window_clone.window.is_visible();
+                            pet_window_clone.window.set_visible(!is_visible);
                         }
                     },
                     AppEvent::TrackChanged(track) => {
@@ -357,7 +344,7 @@ fn main() {
                     }
                     AppEvent::TaskCompleted => {
                         state.last_task_completed = Some(Instant::now());
-                        
+
                         let mut particles = pet_window_clone.prop_particles.borrow_mut();
                         for _ in 0..20 {
                             let px = 80.0 + gtk4::glib::random_double() * 96.0;
@@ -378,7 +365,7 @@ fn main() {
                                 time: 0.0,
                             });
                         }
-                        
+
                         let msgs = [
                             "Awesome! Task complete! 🌟",
                             "One step closer! Woohoo! 🚀",
@@ -396,7 +383,7 @@ fn main() {
                     AppEvent::WorkspaceChanged => {
                         if state.current_state != PetState::PortalOut && state.current_state != PetState::PortalIn {
                             state.start_portal_transition();
-                            
+
                             let msgs = [
                                 "Travelling to hyperspace... 🌌",
                                 "🌀 Wheee! New workspace!",
@@ -430,7 +417,7 @@ fn main() {
                             } else {
                                 state::RoutineState::None
                             };
-                            
+
                             let mut current_r = pet_window_clone.current_routine.borrow_mut();
                             if *current_r != resolved_routine {
                                 *current_r = resolved_routine;
@@ -567,14 +554,14 @@ fn main() {
 
                         // Monitor change flow control
                         let current_resolved = last_resolved_monitor_clone.borrow().clone();
-                        
+
                         if let Some(old_mon) = current_resolved.as_ref() {
                             if old_mon != &target_monitor {
                                 if pending_monitor_clone.borrow().is_none() {
                                     *pending_monitor_clone.borrow_mut() = Some(target_monitor.clone());
                                     if state.current_state != PetState::PortalOut && state.current_state != PetState::PortalIn {
                                         state.start_portal_transition();
-                                        
+
                                         let msgs = [
                                             "Teleporting to another screen... 🌌",
                                             "🌀 Moving over!",
@@ -769,13 +756,13 @@ fn main() {
                         {
                             let active = pet_window_clone.active_prop.get();
                             let mut particles = pet_window_clone.prop_particles.borrow_mut();
-                            
+
                             // Tick existing particles
                             for p in particles.iter_mut() {
                                 p.x += p.speed_x;
                                 p.y += p.speed_y;
                                 p.time += 0.05;
-                                
+
                                 if p.value == 50 {
                                     // Music note particle
                                     p.y -= 1.0;
@@ -820,9 +807,9 @@ fn main() {
                                     }
                                 }
                             }
-                            
+
                             particles.retain(|p| p.alpha > 0.0);
-                            
+
                             // Spawn new particles
                             let rand_val: f64 = gtk4::glib::random_double();
                             if active != ui::window::ActiveProp::None {
@@ -835,7 +822,7 @@ fn main() {
                                             let speed_y = -0.3 - gtk4::glib::random_double() * 0.8;
                                             let speed_x = (gtk4::glib::random_double() - 0.5) * 0.6;
                                             let value = (gtk4::glib::random_int_range(0, 100) % 2) as u8;
-                                            
+
                                             particles.push(ui::window::PropParticle {
                                                 x: px,
                                                 y: py,
@@ -854,7 +841,7 @@ fn main() {
                                             let py = 250.0;
                                             let size = 10.0 + gtk4::glib::random_double() * 15.0;
                                             let speed_y = -4.0 - gtk4::glib::random_double() * 4.0;
-                                            
+
                                             particles.push(ui::window::PropParticle {
                                                 x: px,
                                                 y: py,
@@ -875,7 +862,7 @@ fn main() {
                                             let speed_y = -0.5 - gtk4::glib::random_double() * 0.7;
                                             let speed_x = -0.3 - gtk4::glib::random_double() * 0.5;
                                             let value = gtk4::glib::random_int_range(0, 7) as u8;
-                                            
+
                                             particles.push(ui::window::PropParticle {
                                                 x: px,
                                                 y: py,
@@ -892,45 +879,44 @@ fn main() {
                                 }
                             }
 
-                            // Spawn weather particles (Rain / Snow)
-                            let weather = pet_window_clone.current_weather.borrow().to_lowercase();
-                            if weather == "rainy" {
-                                if rand_val < 0.3 {
-                                    let px = gtk4::glib::random_double() * 256.0;
-                                    let py = 0.0;
-                                    let size = 8.0 + gtk4::glib::random_double() * 12.0;
-                                    let speed_y = 4.0 + gtk4::glib::random_double() * 3.0;
-                                    let speed_x = -0.5 + gtk4::glib::random_double() * 1.0;
-                                    particles.push(ui::window::PropParticle {
-                                        x: px,
-                                        y: py,
-                                        alpha: 1.0,
-                                        size,
-                                        speed_x,
-                                        speed_y,
-                                        value: 60,
-                                        time: 0.0,
-                                    });
-                                }
-                            } else if weather == "snowy" {
-                                if rand_val < 0.15 {
-                                    let px = gtk4::glib::random_double() * 256.0;
-                                    let py = 0.0;
-                                    let size = 3.0 + gtk4::glib::random_double() * 4.0;
-                                    let speed_y = 0.8 + gtk4::glib::random_double() * 0.8;
-                                    let speed_x = -0.2 + gtk4::glib::random_double() * 0.4;
-                                    particles.push(ui::window::PropParticle {
-                                        x: px,
-                                        y: py,
-                                        alpha: 1.0,
-                                        size,
-                                        speed_x,
-                                        speed_y,
-                                        value: 70,
-                                        time: 0.0,
-                                    });
-                                }
-                            }
+                            {
+                                let px = gtk4::glib::random_double() * 256.0;
+                                let py = 0.0;
+
+                                match *pet_window_clone.current_weather.borrow() {
+                                                            WeatherCondition::Rainy | WeatherCondition::Pouring if rand_val < 0.3 => {
+                                                                let size = 8.0 + gtk4::glib::random_double() * 12.0;
+                                                                let speed_y = 4.0 + gtk4::glib::random_double() * 3.0;
+                                                                let speed_x = -0.5 + gtk4::glib::random_double() * 1.0;
+                                                                particles.push(ui::window::PropParticle {
+                                                                    x: px,
+                                                                    y: py,
+                                                                    alpha: 1.0,
+                                                                    size,
+                                                                    speed_x,
+                                                                    speed_y,
+                                                                    value: 60,
+                                                                    time: 0.0,
+                                                                });
+                                                            },
+                                                            WeatherCondition::Snowy | WeatherCondition::SnowyRainy if rand_val < 0.15 => {
+                                                                let size = 3.0 + gtk4::glib::random_double() * 4.0;
+                                                                let speed_y = 0.8 + gtk4::glib::random_double() * 0.8;
+                                                                let speed_x = -0.2 + gtk4::glib::random_double() * 0.4;
+                                                                particles.push(ui::window::PropParticle {
+                                                                    x: px,
+                                                                    y: py,
+                                                                    alpha: 1.0,
+                                                                    size,
+                                                                    speed_x,
+                                                                    speed_y,
+                                                                    value: 70,
+                                                                    time: 0.0,
+                                                                });
+                                                            },
+                                                            _ => (),
+                                                        }
+                                                    }
 
                             // Spawn music notes if dancing
                             let current_state = state.current_state;
@@ -958,19 +944,13 @@ fn main() {
                         let elapsed = now
                             .duration_since(*last_frame_time_clone.borrow())
                             .as_millis() as u64;
-                        let has_hearts = {
-                            let hearts = pet_window_clone.hearts.borrow();
-                            !hearts.is_empty()
-                        };
-                        let has_prop_particles = {
-                            let pts = pet_window_clone.prop_particles.borrow();
-                            !pts.is_empty()
-                        };
+
+                        let has_hearts = pet_window_clone.hearts.borrow().is_empty();
+                        let has_prop_particles = pet_window_clone.prop_particles.borrow().is_empty();
 
                         if elapsed >= state.get_tick_interval() {
                             *last_frame_time_clone.borrow_mut() = now;
 
-                            // Advance the sprite coordinates
                             let (fx, fy) = state.get_sprite_coordinates();
                             *pet_window_clone.frame_coords.borrow_mut() = (fx, fy);
                             pet_window_clone.current_pet_state.set(state.current_state);

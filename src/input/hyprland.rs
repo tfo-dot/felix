@@ -1,5 +1,5 @@
-use crate::event::{AppEvent, InputEvent, ActiveWindowGeometry};
-use std::io::{BufRead, BufReader, Write, Read};
+use crate::event::{ActiveWindowGeometry, AppEvent, InputEvent};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
@@ -10,7 +10,6 @@ fn get_hyprland_socket_path(socket_name: &str) -> std::io::Result<PathBuf> {
     let runtime_dir =
         std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/run/user/1000".to_string());
 
-    // 1. Try env variable signature
     if let Ok(sig) = std::env::var("HYPRLAND_INSTANCE_SIGNATURE") {
         let p = PathBuf::from(&runtime_dir)
             .join("hypr")
@@ -22,25 +21,6 @@ fn get_hyprland_socket_path(socket_name: &str) -> std::io::Result<PathBuf> {
         let p_tmp = PathBuf::from("/tmp/hypr").join(&sig).join(socket_name);
         if p_tmp.exists() {
             return Ok(p_tmp);
-        }
-    }
-
-    // 2. Fallback: Scan directories
-    let search_paths = vec![
-        PathBuf::from(&runtime_dir).join("hypr"),
-        PathBuf::from("/tmp/hypr"),
-    ];
-
-    for base in search_paths {
-        if let Ok(entries) = std::fs::read_dir(base) {
-            for entry in entries.flatten() {
-                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    let p = entry.path().join(socket_name);
-                    if p.exists() {
-                        return Ok(p);
-                    }
-                }
-            }
         }
     }
 
@@ -59,7 +39,7 @@ pub fn spawn_event_listener(tx: Sender<AppEvent>) {
         loop {
             match get_hyprland_socket_path(".socket2.sock") {
                 Ok(path) => {
-                    println!("Connecting to Hyprland event socket: {:?}", path);
+                    log::info!("Connecting to Hyprland event socket: {:?}", path);
                     match UnixStream::connect(&path) {
                         Ok(stream) => {
                             let reader = BufReader::new(stream);
@@ -76,7 +56,9 @@ pub fn spawn_event_listener(tx: Sender<AppEvent>) {
                                             let _ = tx.send(AppEvent::Input(
                                                 InputEvent::ActiveWindow { class, title },
                                             ));
-                                        } else if l.starts_with("workspace>>") || l.starts_with("focusedmon>>") {
+                                        } else if l.starts_with("workspace>>")
+                                            || l.starts_with("focusedmon>>")
+                                        {
                                             let _ = tx.send(AppEvent::WorkspaceChanged);
                                         }
                                     }
@@ -85,12 +67,12 @@ pub fn spawn_event_listener(tx: Sender<AppEvent>) {
                             }
                         }
                         Err(e) => {
-                            eprintln!("Failed to connect to event socket: {:?}. Retrying...", e);
+                            log::warn!("Failed to connect to event socket: {:?}. Retrying...", e);
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to locate event socket: {:?}. Retrying...", e);
+                    log::warn!("Failed to locate event socket: {:?}. Retrying...", e);
                 }
             }
             thread::sleep(Duration::from_secs(2));
@@ -102,37 +84,34 @@ pub fn spawn_cursor_poller(tx: Sender<AppEvent>) {
     thread::spawn(move || {
         loop {
             match get_hyprland_socket_path(".socket.sock") {
-                Ok(path) => {
-                    loop {
-                        match UnixStream::connect(&path) {
-                            Ok(mut stream) => {
-                                if stream.write_all(b"cursorpos").is_ok() {
-                                    let mut reader = BufReader::new(stream);
-                                    let mut response = String::new();
-                                    if reader.read_line(&mut response).is_ok() {
-                                        if let Some((x, y)) = response.split_once(',') {
-                                            let _ =
-                                                tx.send(AppEvent::Input(InputEvent::CursorPos {
-                                                    x: x.trim().parse().unwrap_or_default(),
-                                                    y: y.trim().parse().unwrap_or_default(),
-                                                }));
-                                        };
-                                    }
+                Ok(path) => loop {
+                    match UnixStream::connect(&path) {
+                        Ok(mut stream) => {
+                            if stream.write_all(b"cursorpos").is_ok() {
+                                let mut reader = BufReader::new(stream);
+                                let mut response = String::new();
+                                if reader.read_line(&mut response).is_ok() {
+                                    if let Some((x, y)) = response.split_once(',') {
+                                        let _ = tx.send(AppEvent::Input(InputEvent::CursorPos {
+                                            x: x.trim().parse().unwrap_or_default(),
+                                            y: y.trim().parse().unwrap_or_default(),
+                                        }));
+                                    };
                                 }
                             }
-                            Err(e) => {
-                                eprintln!(
-                                    "Failed to query cursor position: {:?}. Reconnecting socket...",
-                                    e
-                                );
-                                break;
-                            }
                         }
-                        thread::sleep(Duration::from_millis(33));
+                        Err(e) => {
+                            log::warn!(
+                                "Failed to query cursor position: {:?}. Reconnecting socket...",
+                                e
+                            );
+                            break;
+                        }
                     }
-                }
+                    thread::sleep(Duration::from_millis(33));
+                },
                 Err(e) => {
-                    eprintln!("Failed to locate command socket: {:?}. Retrying...", e);
+                    log::warn!("Failed to locate command socket: {:?}. Retrying...", e);
                 }
             }
             thread::sleep(Duration::from_secs(2));
@@ -154,18 +133,16 @@ pub fn spawn_active_window_poller(tx: Sender<AppEvent>) {
     thread::spawn(move || {
         loop {
             match get_hyprland_socket_path(".socket.sock") {
-                Ok(path) => {
-                    loop {
-                        if let Some(geom) = query_active_window_geometry_internal(&path) {
-                            let _ = tx.send(AppEvent::Input(InputEvent::ActiveWindowGeom(geom)));
-                        } else {
-                            let _ = tx.send(AppEvent::Input(InputEvent::ActiveWindowGeomNone));
-                        }
-                        thread::sleep(Duration::from_millis(150));
+                Ok(path) => loop {
+                    if let Some(geom) = query_active_window_geometry_internal(&path) {
+                        let _ = tx.send(AppEvent::Input(InputEvent::ActiveWindowGeom(geom)));
+                    } else {
+                        let _ = tx.send(AppEvent::Input(InputEvent::ActiveWindowGeomNone));
                     }
-                }
+                    thread::sleep(Duration::from_millis(150));
+                },
                 Err(e) => {
-                    eprintln!("Failed to locate command socket: {:?}. Retrying...", e);
+                    log::warn!("Failed to locate command socket: {:?}. Retrying...", e);
                 }
             }
             thread::sleep(Duration::from_secs(2));
@@ -182,12 +159,12 @@ fn query_active_window_geometry_internal(path: &std::path::Path) -> Option<Activ
         return None;
     }
     let parsed: HyprActiveWindowJson = serde_json::from_str(&response).ok()?;
-    
+
     // If window size is 0x0, it's not a real window (could be desktop or invalid)
     if parsed.size[0] <= 0 || parsed.size[1] <= 0 {
         return None;
     }
-    
+
     Some(ActiveWindowGeometry {
         address: parsed.address,
         x: parsed.at[0],

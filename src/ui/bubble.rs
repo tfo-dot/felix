@@ -14,29 +14,26 @@ impl SpeechBubble {
             .visible(false) // hidden by default
             .build();
 
-        // 1. Bubble body box (styled via CSS)
         let body = gtk4::Box::builder()
             .css_classes(vec!["bubble-body".to_string()])
             .build();
-            
+
         let label = gtk4::Label::builder()
             .wrap(true)
             .max_width_chars(25)
             .justify(gtk4::Justification::Center)
             .build();
-            
+
         body.append(&label);
         container.append(&body);
 
-        // 2. Bubble tail (triangle pointing down)
         let tail = gtk4::DrawingArea::builder()
             .content_width(16)
             .content_height(8)
             .halign(gtk4::Align::Center)
             .build();
-            
+
         tail.set_draw_func(move |_area, cr, _width, _height| {
-            // Draw a downward pointing triangle matching the bubble-body color
             cr.set_source_rgba(30.0 / 255.0, 30.0 / 255.0, 40.0 / 255.0, 0.95);
             cr.move_to(0.0, 0.0);
             cr.line_to(16.0, 0.0);
@@ -44,7 +41,7 @@ impl SpeechBubble {
             cr.close_path();
             let _ = cr.fill();
         });
-        
+
         container.append(&tail);
 
         Self { container, label }

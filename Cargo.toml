@@ -14,6 +14,9 @@ sysinfo = "0.39.6"
 evdev = "0.13.2"
 ksni = { version = "0.3.6", features = ["blocking"] }
 cairo-rs = { version = "0.22.0", features = ["png"] }
+reqwest = {version = "0.13.4", features = ["blocking", "json"]}
+log = "0.4"
+env_logger = "0.11"
 
 [features]
 default = ["hyprland"]

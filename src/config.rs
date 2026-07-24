@@ -38,16 +38,12 @@ pub struct Config {
     pub pomodoro: PomodoroConfig,
     #[serde(default = "default_checklist_visible")]
     pub checklist_visible: bool,
-    #[serde(default = "default_weather")]
-    pub weather: String,
+    pub ha_address: String,
+    pub ha_key: String,
 }
 
 fn default_checklist_visible() -> bool {
     true
-}
-
-fn default_weather() -> String {
-    "auto".to_string()
 }
 
 impl Default for Config {
@@ -66,7 +62,7 @@ impl Default for Config {
             pet: PetConfig {
                 scale: 1.0,
                 size: 128,
-                cursor_speed_threshold: 30.0, // distance in pixels between polls (at 30FPS) to trigger tracking
+                cursor_speed_threshold: 30.0,
                 window_interaction: true,
             },
             pomodoro: PomodoroConfig {
@@ -76,7 +72,8 @@ impl Default for Config {
                 start_paused: true,
             },
             checklist_visible: true,
-            weather: "auto".to_string(),
+            ha_address: "".to_string(),
+            ha_key: "".to_string(),
         }
     }
 }
@@ -102,12 +99,12 @@ pub fn load_or_create_config() -> Config {
             Ok(content) => match toml::from_str(&content) {
                 Ok(cfg) => cfg,
                 Err(e) => {
-                    eprintln!("Error parsing config: {}, using default", e);
+                    log::warn!("Error parsing config: {}, using default", e);
                     Config::default()
                 }
             },
             Err(e) => {
-                eprintln!("Error reading config: {}, using default", e);
+                log::warn!("Error reading config: {}, using default", e);
                 Config::default()
             }
         }
@@ -128,7 +125,7 @@ where
                 callback();
             }
         }
-        Err(e) => eprintln!("Watcher error: {:?}", e),
+        Err(e) => log::error!("Watcher error: {:?}", e),
     })?;
 
     watcher.watch(&path, RecursiveMode::NonRecursive)?;
