@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Book Cover -->
+  <rect 
+    x="38" 
+    y="113" 
+    width="180" 
+    height="50" 
+    fill="rgb(128, 64, 26)" 
+  />
+
+  <!-- Left Page -->
+  <path 
+    d="M 128 113 C 103 93, 68 93, 48 113 L 48 153 C 68 133, 103 133, 128 153 Z" 
+    fill="rgb(245, 245, 245)" 
+  />
+
+  <!-- Right Page -->
+  <path 
+    d="M 128 113 C 153 93, 188 93, 208 113 L 208 153 C 188 133, 153 133, 128 153 Z" 
+    fill="rgb(245, 245, 245)" 
+  />
+
+  <!-- Text Lines -->
+  <path 
+    d="M 63 113 L 103 113 M 58 123 L 108 123 M 63 133 L 93 133 M 153 113 L 193 113 M 148 123 L 198 123 M 163 133 L 193 133" 
+    stroke="rgb(51, 51, 51)" 
+    stroke-opacity="0.8" 
+    stroke-width="5" 
+    stroke-linecap="round"
+    fill="none" 
+  />
+</svg>

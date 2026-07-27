@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Main neck loop -->
+  <path 
+    d="M 32 80 C 80 104, 176 104, 224 80" 
+    stroke="rgb(217, 38, 38)" 
+    stroke-width="48" 
+    stroke-linecap="round" 
+    fill="none" 
+  />
+
+  <!-- Dangling ends -->
+  <path 
+    d="M 184 96 L 200 188 M 208 92 L 240 168" 
+    stroke="rgb(217, 38, 38)" 
+    stroke-width="32" 
+    stroke-linecap="round" 
+    fill="none" 
+  />
+</svg>

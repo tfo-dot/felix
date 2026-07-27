@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Mug Handle (Left side) -->
+  <path 
+    d="M 103 208 A 20 20 0 0 1 103 168" 
+    stroke="rgb(242, 242, 242)" 
+    stroke-width="7.5" 
+    fill="none" 
+  />
+
+  <!-- Mug Body -->
+  <rect 
+    x="103" 
+    y="143" 
+    width="80" 
+    height="90" 
+    fill="rgb(242, 242, 242)" 
+  />
+
+  <!-- Liquid Surface -->
+  <ellipse 
+    cx="143" 
+    cy="143" 
+    rx="35" 
+    ry="10.5" 
+    fill="rgb(115, 64, 38)" 
+  />
+
+  <!-- Steam Lines (Static snapshot of the sine wave) -->
+  <path 
+    d="M 128 118 C 143 88, 113 63, 128 33 M 158 118 C 143 88, 173 63, 158 33" 
+    stroke="rgb(230, 230, 230)" 
+    stroke-opacity="0.65" 
+    stroke-width="6" 
+    stroke-linecap="round" 
+    fill="none" 
+  />
+</svg>

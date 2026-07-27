@@ -1,9 +1,9 @@
 mod config;
 mod event;
 mod input;
+mod interaction;
 mod state;
 mod ui;
-mod interaction;
 
 use config::{load_or_create_config, watch_config};
 use event::{AppEvent, InputEvent, TrayAction, WeatherCondition};
@@ -21,6 +21,8 @@ use gtk4::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
+
+use crate::ui::window::PropId;
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -288,33 +290,17 @@ fn main() {
                                 let (cx, cy) = *current_pos_clone.borrow();
                                 let target_x = cx as i32;
                                 let target_y = cy as i32;
-                                
+
                                 let y_diff = (target_y - active_window.y).abs();
                                 let x_diff_left = (target_x - (active_window.x - pet_size + 20)).abs();
                                 let x_diff_right = (target_x - (active_window.x + active_window.width - 20)).abs();
-                                
+
                                 if y_diff < x_diff_left && y_diff < x_diff_right {
                                     let x_rel = (target_x - active_window.x).clamp(0, active_window.width - pet_size);
                                     state.interaction_state = state::InteractionState::Sitting {
                                         x_rel,
                                         duration_secs: 8,
                                         start_time: Instant::now(),
-                                    };
-                                } else if x_diff_left < x_diff_right {
-                                    let y_rel = (target_y - active_window.y).clamp(0, active_window.height - pet_size) as f64;
-                                    state.interaction_state = state::InteractionState::Climbing {
-                                        y_rel,
-                                        target_y_rel: active_window.height - pet_size,
-                                        side: state::ClimbSide::Left,
-                                        dir_down: true,
-                                    };
-                                } else {
-                                    let y_rel = (target_y - active_window.y).clamp(0, active_window.height - pet_size) as f64;
-                                    state.interaction_state = state::InteractionState::Climbing {
-                                        y_rel,
-                                        target_y_rel: active_window.height - pet_size,
-                                        side: state::ClimbSide::Right,
-                                        dir_down: true,
                                     };
                                 }
                             }
@@ -339,7 +325,7 @@ fn main() {
                             size: 16.0,
                             speed_x: 0.0,
                             speed_y: 0.0,
-                            value: 95,
+                            id: ui::window::PropId::Threat,
                             time: 0.0,
                         });
                         show_bubble("Ooh, a treat? 🐠".to_string(), 3, 2);
@@ -359,17 +345,6 @@ fn main() {
                             pomo.seconds_remaining =
                                 current_config.pomodoro.work_duration_mins * 60;
                             show_bubble("Timer Reset".to_string(), 3, 2);
-                        }
-                        TrayAction::ToggleChecklist => {
-                            let visible = !pet_window_clone.checklist_card.get_visible();
-                            pet_window_clone.checklist_card.set_visible(visible);
-                            pet_window_clone.window.queue_resize();
-                            let mut cfg = config_clone.borrow_mut();
-                            cfg.checklist_visible = visible;
-                            if let Ok(toml_str) = toml::to_string_pretty(&*cfg) {
-                                let path = config::get_config_path();
-                                let _ = std::fs::write(&path, toml_str);
-                            }
                         }
                         TrayAction::ReloadConfig => {
                             let new_cfg = load_or_create_config();
@@ -395,39 +370,6 @@ fn main() {
                         } else {
                             state.music_playing = false;
                         }
-                    }
-                    AppEvent::TaskCompleted => {
-                        state.last_task_completed = Some(Instant::now());
-
-                        let mut particles = pet_window_clone.prop_particles.borrow_mut();
-                        for _ in 0..20 {
-                            let px = 80.0 + gtk4::glib::random_double() * 96.0;
-                            let py = 120.0 + (gtk4::glib::random_double() - 0.5) * 40.0;
-                            let size = 6.0 + gtk4::glib::random_double() * 8.0;
-                            let angle = gtk4::glib::random_double() * 2.0 * std::f64::consts::PI;
-                            let speed = 1.0 + gtk4::glib::random_double() * 2.5;
-                            let speed_x = angle.cos() * speed;
-                            let speed_y = angle.sin() * speed - 1.5;
-                            particles.push(ui::window::PropParticle {
-                                x: px,
-                                y: py,
-                                alpha: 1.0,
-                                size,
-                                speed_x,
-                                speed_y,
-                                value: 80,
-                                time: 0.0,
-                            });
-                        }
-
-                        let msgs = [
-                            "Awesome! Task complete! 🌟",
-                            "One step closer! Woohoo! 🚀",
-                            "Keep it up! You're doing great! 🎉",
-                            "Done and dusted! 🐾",
-                        ];
-                        let idx = gtk4::glib::random_int_range(0, msgs.len() as i32) as usize;
-                        show_bubble(msgs[idx].to_string(), 4, 2);
                     }
                     AppEvent::WeatherChanged(w) => {
                         *pet_window_clone.current_weather.borrow_mut() = w;
@@ -624,7 +566,6 @@ fn main() {
                         let m_y = geom.y() as f64;
                         let m_w = geom.width() as f64;
                         let m_h = geom.height() as f64;
-                        let monitor_width = geom.width();
 
                         // Set the window monitor
                         pet_window_clone.window.set_monitor(Some(&monitor));
@@ -648,7 +589,7 @@ fn main() {
                         pet_window_clone.active_prop.set(active_prop);
 
                         // Update interaction state machine
-                        state.update_interaction(&current_config, pet_size, monitor_width);
+                        state.update_interaction(&current_config, pet_size);
 
                         // Position the window
                         if state.is_dragging {
@@ -661,13 +602,6 @@ fn main() {
                                 }
                                 state::InteractionState::Walking { x_rel, .. } => {
                                     (active_window.x + (*x_rel as i32), active_window.y + 16)
-                                }
-                                state::InteractionState::Climbing { y_rel, side, .. } => {
-                                    let x = match side {
-                                        state::ClimbSide::Left => active_window.x - pet_size + 20,
-                                        state::ClimbSide::Right => active_window.x + active_window.width - 20,
-                                    };
-                                    (x, active_window.y + (*y_rel as i32))
                                 }
                                 _ => (0, 0),
                             };
@@ -727,13 +661,6 @@ fn main() {
                                     }
                                     state::InteractionState::Walking { x_rel, .. } => {
                                         (active_window.x + (*x_rel as i32), active_window.y + 16)
-                                    }
-                                    state::InteractionState::Climbing { y_rel, side, .. } => {
-                                        let x = match side {
-                                            state::ClimbSide::Left => active_window.x - pet_size + 20,
-                                            state::ClimbSide::Right => active_window.x + active_window.width - 20,
-                                        };
-                                        (x, active_window.y + (*y_rel as i32))
                                     }
                                     _ => (0, 0),
                                 };
@@ -802,32 +729,21 @@ fn main() {
                                 p.y += p.speed_y;
                                 p.time += 0.05;
 
-                                if p.value == 50 {
-                                    // Music note particle
-                                    p.y -= 1.0;
+                                match p.id {
+                                    ui::window::PropId::MusicNote => {
+                                         p.y -= 1.0;
                                     p.x += p.time.sin() * 0.4;
                                     p.alpha -= 0.015;
-                                } else if p.value == 60 {
-                                    // Raindrop falling down
-                                    p.y += p.speed_y;
+                                    }
+                                    ui::window::PropId::Rain => {
+                                         p.y += p.speed_y;
                                     p.x += p.speed_x;
                                     if p.y > 256.0 {
                                         p.alpha = 0.0;
                                     }
-                                } else if p.value == 70 {
-                                    // Snowflake drifting down
-                                    p.y += p.speed_y;
-                                    p.x += p.time.sin() * 0.6;
-                                    if p.y > 256.0 {
-                                        p.alpha = 0.0;
-                                    }
-                                } else if p.value == 80 {
-                                    // Confetti star particle
-                                    p.speed_y += 0.12; // gravity
-                                    p.alpha -= 0.025;
-                                } else if p.value == 95 {
-                                    // Food treat flying towards Felix's mouth
-                                    let dx = 128.0 - p.x;
+                                    },
+                                    ui::window::PropId::Threat => {
+                                        let dx = 128.0 - p.x;
                                     let dy = 135.0 - p.y;
                                     let dist = (dx*dx + dy*dy).sqrt();
                                     if dist <= 8.0 {
@@ -839,12 +755,20 @@ fn main() {
                                         p.x += (dx / dist) * step;
                                         p.y += (dy / dist) * step;
                                     }
-                                } else if p.value == 96 {
-                                    // Eating crumbs fall down
-                                    p.speed_y += 0.15; // gravity
-                                    p.alpha -= 0.03;   // fade out
-                                } else {
-                                    match active {
+                                    },
+                                    ui::window::PropId::Snowflake => {
+                                        p.y += p.speed_y;
+                                    p.x += p.time.sin() * 0.6;
+                                    if p.y > 256.0 {
+                                        p.alpha = 0.0;
+                                    }
+                                    },
+                                    ui::window::PropId::Crumb => {
+                                        p.speed_y += 0.15; // gravity
+                                        p.alpha -= 0.03;   // fade out
+                                    }
+                                    _ => {
+                                        match active {
                                         ui::window::ActiveProp::WutheringWaves => {
                                             p.x += p.time.sin() * 0.5;
                                             p.alpha -= 0.02;
@@ -881,6 +805,7 @@ fn main() {
                                             p.alpha = 0.0;
                                         }
                                     }
+                                    }
                                 }
                             }
 
@@ -902,7 +827,7 @@ fn main() {
                                         size,
                                         speed_x,
                                         speed_y,
-                                        value: 96,
+                                        id: ui::window::PropId::Crumb,
                                         time: 0.0,
                                     });
                                 }
@@ -925,21 +850,22 @@ fn main() {
                             if active != ui::window::ActiveProp::None {
                                 let apps = interaction::get_app_interactions();
                                 if let Some(app) = apps.iter().find(|app| app.prop == active) {
-                                    if let Some(ref p_cfg) = app.particle_config {
-                                        if rand_val < p_cfg.spawn_chance {
-                                            let px = p_cfg.spawn_box.0 + gtk4::glib::random_double() * p_cfg.spawn_box.2;
-                                            let py = p_cfg.spawn_box.1 + gtk4::glib::random_double() * p_cfg.spawn_box.3;
-                                             
-                                            let size = p_cfg.size_range.0 + gtk4::glib::random_double() * (p_cfg.size_range.1 - p_cfg.size_range.0);
-                                            let speed_x = p_cfg.speed_x_range.0 + gtk4::glib::random_double() * (p_cfg.speed_x_range.1 - p_cfg.speed_x_range.0);
-                                            let speed_y = p_cfg.speed_y_range.0 + gtk4::glib::random_double() * (p_cfg.speed_y_range.1 - p_cfg.speed_y_range.0);
-                                             
-                                            let p_val = if p_cfg.val_range.1 > p_cfg.val_range.0 {
-                                                gtk4::glib::random_int_range(p_cfg.val_range.0, p_cfg.val_range.1) as u8
-                                            } else {
-                                                p_cfg.val_range.0 as u8
-                                            };
+                                        if rand_val < app.particle_config.spawn_chance {
+                                            let px = app.particle_config.spawn_box.0 + gtk4::glib::random_double() * app.particle_config.spawn_box.2;
+                                            let py = app.particle_config.spawn_box.1 + gtk4::glib::random_double() * app.particle_config.spawn_box.3;
 
+                                            let size = app.particle_config.size_range.0 + gtk4::glib::random_double() * (app.particle_config.size_range.1 - app.particle_config.size_range.0);
+                                            let speed_x = app.particle_config.speed_x_range.0 + gtk4::glib::random_double() * (app.particle_config.speed_x_range.1 - app.particle_config.speed_x_range.0);
+                                            let speed_y = app.particle_config.speed_y_range.0 + gtk4::glib::random_double() * (app.particle_config.speed_y_range.1 - app.particle_config.speed_y_range.0);
+
+                                            let p_val = if app.particle_config.range.len() == 0 {
+                                                PropId::Code(0)
+                                            } else {
+                                            let idx = gtk4::glib::random_int_range(0, app.particle_config.range.len().try_into().unwrap());
+
+                                            app.particle_config.range[idx as usize]
+                                        };
+                                        
                                             particles.push(ui::window::PropParticle {
                                                 x: px,
                                                 y: py,
@@ -947,17 +873,15 @@ fn main() {
                                                 size,
                                                 speed_x,
                                                 speed_y,
-                                                value: p_val,
+                                                id: p_val,
                                                 time: 0.0,
                                             });
                                         }
-                                    }
                                 }
                             }
 
                             {
                                 let px = gtk4::glib::random_double() * 256.0;
-                                let py = 0.0;
 
                                 match *pet_window_clone.current_weather.borrow() {
                                                             WeatherCondition::Rainy | WeatherCondition::Pouring if rand_val < 0.3 => {
@@ -966,12 +890,12 @@ fn main() {
                                                                 let speed_x = -0.5 + gtk4::glib::random_double() * 1.0;
                                                                 particles.push(ui::window::PropParticle {
                                                                     x: px,
-                                                                    y: py,
+                                                                    y: 0.0,
                                                                     alpha: 1.0,
                                                                     size,
                                                                     speed_x,
                                                                     speed_y,
-                                                                    value: 60,
+                                                                    id: ui::window::PropId::Rain,
                                                                     time: 0.0,
                                                                 });
                                                             },
@@ -981,12 +905,12 @@ fn main() {
                                                                 let speed_x = -0.2 + gtk4::glib::random_double() * 0.4;
                                                                 particles.push(ui::window::PropParticle {
                                                                     x: px,
-                                                                    y: py,
+                                                                    y: 0.0,
                                                                     alpha: 1.0,
                                                                     size,
                                                                     speed_x,
                                                                     speed_y,
-                                                                    value: 70,
+                                                                    id: ui::window::PropId::Snowflake,
                                                                     time: 0.0,
                                                                 });
                                                             },
@@ -994,7 +918,6 @@ fn main() {
                                                         }
                                                     }
 
-                            // Spawn music notes if dancing
                             let current_state = state.current_state;
                             use crate::state::PetState;
                             if current_state == PetState::Dancing {
@@ -1009,7 +932,7 @@ fn main() {
                                         size,
                                         speed_x: 0.0,
                                         speed_y: 0.0,
-                                        value: 50,
+                                        id: ui::window::PropId::MusicNote,
                                         time: 0.0,
                                     });
                                 }
@@ -1043,14 +966,12 @@ fn main() {
                             }
                         }
 
-                        // D. Update Speech Bubble Display text
                         let current_timeout = *bubble_timeout_clone.borrow();
                         if current_timeout > 0 {
                             pet_window_clone
                                 .bubble
                                 .set_text(&bubble_text_clone.borrow());
                         } else if !matches!(pomo.state, PomodoroState::Paused { .. }) {
-                            // Display active pomodoro timer
                             let mins = pomo.seconds_remaining / 60;
                             let secs = pomo.seconds_remaining % 60;
                             let pomo_text =

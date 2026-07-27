@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Left face (Dark dirt) -->
+  <path 
+    d="M 128 232 L 32 176 L 32 80 L 128 136 Z" 
+    fill="rgb(89, 56, 38)" 
+  />
+
+  <!-- Right face (Lighter dirt) -->
+  <path 
+    d="M 128 232 L 224 176 L 224 80 L 128 136 Z" 
+    fill="rgb(115, 71, 46)" 
+  />
+
+  <!-- Top face (Grass) -->
+  <path 
+    d="M 128 136 L 32 80 L 128 24 L 224 80 Z" 
+    fill="rgb(89, 179, 64)" 
+  />
+</svg>

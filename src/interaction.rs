@@ -1,4 +1,4 @@
-use crate::ui::window::ActiveProp;
+use crate::ui::window::{ActiveProp, PropId};
 
 #[derive(Debug, Clone)]
 pub struct AppParticleConfig {
@@ -7,24 +7,21 @@ pub struct AppParticleConfig {
     pub size_range: (f64, f64),
     pub speed_x_range: (f64, f64),
     pub speed_y_range: (f64, f64),
-    pub val_range: (i32, i32), // start and end range (exclusive) for particle types
+    pub range: Vec<PropId>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AppInteraction {
-    pub name: &'static str,
     pub match_patterns: Vec<&'static str>,
     pub prop: ActiveProp,
     pub focus_comments: Vec<&'static str>,
     pub periodic_comments: Vec<&'static str>,
-    pub particle_config: Option<AppParticleConfig>,
+    pub particle_config: AppParticleConfig,
 }
 
 pub fn get_app_interactions() -> Vec<AppInteraction> {
     vec![
         AppInteraction {
-            name: "Wuthering Waves",
             match_patterns: vec!["wuthering", "waves"],
             prop: ActiveProp::WutheringWaves,
             focus_comments: vec![
@@ -39,18 +36,22 @@ pub fn get_app_interactions() -> Vec<AppInteraction> {
                 "This Tacet Field is active! ⚡",
                 "Listen to the sound of waves... 🌊",
             ],
-            particle_config: Some(AppParticleConfig {
+            particle_config: AppParticleConfig {
                 spawn_chance: 0.25,
                 spawn_box: (167.5, 67.5, 35.0, 35.0),
                 size_range: (4.0, 10.0),
                 speed_x_range: (-0.3, 0.3),
                 speed_y_range: (-1.1, -0.3),
-                val_range: (0, 2),
-            }),
+                range: vec![PropId::Spark(false), PropId::Spark(true)],
+            },
         },
         AppInteraction {
-            name: "Reverse: 1999",
-            match_patterns: vec!["reverse: 1999", "reverse 1999", "reverse1999", "reverse:1999"],
+            match_patterns: vec![
+                "reverse: 1999",
+                "reverse 1999",
+                "reverse1999",
+                "reverse:1999",
+            ],
             prop: ActiveProp::Reverse1999,
             focus_comments: vec![
                 "The Storm is coming! 🌧️",
@@ -64,17 +65,16 @@ pub fn get_app_interactions() -> Vec<AppInteraction> {
                 "Let's brew some black tea. ☕",
                 "Keep moving, don't get caught in the Storm! 🌪️",
             ],
-            particle_config: Some(AppParticleConfig {
+            particle_config: AppParticleConfig {
                 spawn_chance: 0.35,
                 spawn_box: (0.0, 250.0, 256.0, 1.0),
                 size_range: (10.0, 25.0),
                 speed_x_range: (0.0, 0.0),
                 speed_y_range: (-8.0, -4.0),
-                val_range: (0, 1),
-            }),
+                range: vec![PropId::Rain],
+            },
         },
         AppInteraction {
-            name: "Sublime/Kitty Terminal",
             match_patterns: vec!["sublime", "kitty"],
             prop: ActiveProp::SublimeKitty,
             focus_comments: vec![
@@ -89,17 +89,25 @@ pub fn get_app_interactions() -> Vec<AppInteraction> {
                 "git commit -m 'pet the kitty' 🐾",
                 "Blinking terminal cursor is soothing... 💻",
             ],
-            particle_config: Some(AppParticleConfig {
+            particle_config: AppParticleConfig {
                 spawn_chance: 0.15,
                 spawn_box: (100.0, 150.0, 140.0, 50.0),
                 size_range: (9.0, 13.0),
                 speed_x_range: (-0.8, -0.3),
                 speed_y_range: (-1.2, -0.5),
-                val_range: (0, 7),
-            }),
+                range: vec![
+                    PropId::Code(0),
+                    PropId::Code(1),
+                    PropId::Code(2),
+                    PropId::Code(3),
+                    PropId::Code(4),
+                    PropId::Code(5),
+                    PropId::Code(6),
+                    PropId::Code(7),
+                ],
+            },
         },
         AppInteraction {
-            name: "VS Code",
             match_patterns: vec!["code", "codium", "visual studio"],
             prop: ActiveProp::VSCode,
             focus_comments: vec![
@@ -114,17 +122,16 @@ pub fn get_app_interactions() -> Vec<AppInteraction> {
                 "Remember to format with rustfmt! ⚙️",
                 "Writing more unit tests... 🧪",
             ],
-            particle_config: Some(AppParticleConfig {
+            particle_config: AppParticleConfig {
                 spawn_chance: 0.20,
                 spawn_box: (170.0, 70.0, 30.0, 30.0),
                 size_range: (3.0, 7.0),
                 speed_x_range: (-0.2, 0.2),
                 speed_y_range: (-1.3, -0.5),
-                val_range: (0, 4),
-            }),
+                range: vec![],
+            },
         },
         AppInteraction {
-            name: "Web Browser",
             match_patterns: vec!["firefox", "chrome", "brave", "chromium", "zen"],
             prop: ActiveProp::Browser,
             focus_comments: vec![
@@ -139,17 +146,16 @@ pub fn get_app_interactions() -> Vec<AppInteraction> {
                 "Watching YouTube tutorials? 📺",
                 "Let's check the weather forecast. ☀️",
             ],
-            particle_config: Some(AppParticleConfig {
+            particle_config: AppParticleConfig {
                 spawn_chance: 0.20,
                 spawn_box: (167.5, 67.5, 35.0, 35.0),
                 size_range: (8.0, 14.0),
                 speed_x_range: (-0.25, 0.25),
                 speed_y_range: (-1.0, -0.4),
-                val_range: (0, 2),
-            }),
+                range: vec![],
+            },
         },
         AppInteraction {
-            name: "Discord",
             match_patterns: vec!["discord"],
             prop: ActiveProp::Discord,
             focus_comments: vec![
@@ -164,17 +170,16 @@ pub fn get_app_interactions() -> Vec<AppInteraction> {
                 "Joined a voice channel? 🎙️",
                 "Keep the conversation flowing! 💬",
             ],
-            particle_config: Some(AppParticleConfig {
+            particle_config: AppParticleConfig {
                 spawn_chance: 0.15,
                 spawn_box: (170.0, 70.0, 30.0, 30.0),
                 size_range: (4.0, 9.0),
                 speed_x_range: (-0.2, 0.2),
                 speed_y_range: (-1.2, -0.6),
-                val_range: (0, 1),
-            }),
+                range: vec![PropId::Spark(false), PropId::Spark(true)],
+            },
         },
         AppInteraction {
-            name: "Minecraft",
             match_patterns: vec!["minecraft"],
             prop: ActiveProp::Minecraft,
             focus_comments: vec![
@@ -189,17 +194,16 @@ pub fn get_app_interactions() -> Vec<AppInteraction> {
                 "Time to feed the wolves! 🐺",
                 "Entering the Nether... 🔥",
             ],
-            particle_config: Some(AppParticleConfig {
+            particle_config: AppParticleConfig {
                 spawn_chance: 0.25,
                 spawn_box: (170.0, 85.0, 30.0, 5.0),
                 size_range: (2.0, 5.0),
                 speed_x_range: (-0.5, 0.5),
                 speed_y_range: (0.5, 1.5),
-                val_range: (0, 1),
-            }),
+                range: vec![PropId::Spark(false), PropId::Spark(true)],
+            },
         },
         AppInteraction {
-            name: "Steam",
             match_patterns: vec!["steam"],
             prop: ActiveProp::Steam,
             focus_comments: vec![
@@ -212,17 +216,16 @@ pub fn get_app_interactions() -> Vec<AppInteraction> {
                 "Updating game library... 🔄",
                 "Downloading latest updates... 📥",
             ],
-            particle_config: Some(AppParticleConfig {
+            particle_config: AppParticleConfig {
                 spawn_chance: 0.22,
                 spawn_box: (170.0, 70.0, 30.0, 30.0),
                 size_range: (3.0, 7.0),
                 speed_x_range: (-0.3, 0.3),
                 speed_y_range: (-1.5, -0.8),
-                val_range: (0, 1),
-            }),
+                range: vec![PropId::Spark(false), PropId::Spark(true)],
+            },
         },
         AppInteraction {
-            name: "Spotify",
             match_patterns: vec!["spotify"],
             prop: ActiveProp::Spotify,
             focus_comments: vec![
@@ -235,14 +238,14 @@ pub fn get_app_interactions() -> Vec<AppInteraction> {
                 "Adding this song to my favorites! ❤️",
                 "Searching for the perfect playlist... 🔍",
             ],
-            particle_config: Some(AppParticleConfig {
+            particle_config: AppParticleConfig {
                 spawn_chance: 0.18,
                 spawn_box: (170.0, 70.0, 30.0, 30.0),
                 size_range: (10.0, 15.0),
                 speed_x_range: (-0.4, 0.4),
                 speed_y_range: (-1.0, -0.5),
-                val_range: (0, 4), // 4 different notes
-            }),
+                range: vec![PropId::MusicNote],
+            },
         },
     ]
 }

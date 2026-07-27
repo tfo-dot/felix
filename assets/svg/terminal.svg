@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Terminal glass casing (base background) -->
+  <rect 
+    x="15.5" 
+    y="56" 
+    width="225" 
+    height="144" 
+    rx="18" 
+    fill="rgb(26, 26, 36)" 
+    fill-opacity="0.95" 
+  />
+
+  <!-- Terminal glow border (neon cyan) -->
+  <rect 
+    x="15.5" 
+    y="56" 
+    width="225" 
+    height="144" 
+    rx="18" 
+    stroke="rgb(0, 230, 179)" 
+    stroke-width="4.5" 
+    stroke-opacity="0.7" 
+    fill="none" 
+  />
+
+  <!-- Terminal header bar (Path used to keep top corners rounded) -->
+  <path 
+    d="M 18.5 83 L 18.5 74 A 15 15 0 0 1 33.5 59 L 222.5 59 A 15 15 0 0 1 237.5 74 L 237.5 83 Z" 
+    fill="rgb(51, 51, 64)" 
+    fill-opacity="0.8" 
+  />
+
+  <!-- Title dots (Red, Yellow, Green) -->
+  <circle cx="33.5" cy="71" r="6" fill="rgb(255, 102, 102)" />
+  <circle cx="48.5" cy="71" r="6" fill="rgb(255, 204, 77)" />
+  <circle cx="63.5" cy="71" r="6" fill="rgb(77, 204, 102)" />
+
+  <!-- Prompt string: "$ felix" -->
+  <text x="33.5" y="122" font-family="monospace" font-size="27" font-weight="bold">
+    <tspan fill="rgb(0, 230, 128)">$ </tspan>
+    <tspan fill="rgb(230, 230, 242)">felix</tspan>
+  </text>
+
+  <!-- Static visible cursor -->
+  <rect 
+    x="159.5" 
+    y="98" 
+    width="15" 
+    height="27" 
+    fill="rgb(0, 230, 179)" 
+    fill-opacity="0.9" 
+  />
+
+  <!-- Mock output lines -->
+  <rect 
+    x="33.5" 
+    y="140" 
+    width="135" 
+    height="12" 
+    fill="rgb(102, 153, 255)" 
+    fill-opacity="0.85" 
+  />
+  
+  <rect 
+    x="33.5" 
+    y="164" 
+    width="75" 
+    height="12" 
+    fill="rgb(255, 153, 51)" 
+    fill-opacity="0.85" 
+  />
+</svg>

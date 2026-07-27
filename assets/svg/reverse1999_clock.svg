@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Ring loop on top -->
+  <circle 
+    cx="128" 
+    cy="50" 
+    r="30" 
+    stroke="rgb(230, 179, 51)" 
+    stroke-width="12.5" 
+    fill="none" 
+  />
+
+  <!-- Outer gold casing -->
+  <circle 
+    cx="128" 
+    cy="140" 
+    r="90" 
+    fill="rgb(230, 179, 51)" 
+  />
+
+  <!-- White dial face -->
+  <circle 
+    cx="128" 
+    cy="140" 
+    r="70" 
+    fill="rgb(250, 245, 230)" 
+  />
+
+  <!-- Watch ticks (3, 6, 9, 12) -->
+  <path 
+    d="M 183 140 L 198 140 M 128 195 L 128 210 M 73 140 L 58 140 M 128 85 L 128 70" 
+    stroke="rgb(51, 38, 26)" 
+    stroke-width="7.5" 
+    stroke-linecap="round" 
+    fill="none" 
+  />
+
+  <!-- Hour hand (Thicker, pointing to ~10 o'clock) -->
+  <path 
+    d="M 128 140 L 98 122" 
+    stroke="rgb(51, 38, 26)" 
+    stroke-width="10" 
+    stroke-linecap="round" 
+    fill="none" 
+  />
+
+  <!-- Minute hand (Thinner, pointing to ~2 o'clock) -->
+  <path 
+    d="M 128 140 L 176 112" 
+    stroke="rgb(51, 38, 26)" 
+    stroke-width="5" 
+    stroke-linecap="round" 
+    fill="none" 
+  />
+
+  <!-- Center pin -->
+  <circle 
+    cx="128" 
+    cy="140" 
+    r="10" 
+    fill="rgb(51, 38, 26)" 
+  />
+</svg>

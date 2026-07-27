@@ -29,7 +29,6 @@ pub enum TrayAction {
     TogglePause,
     ResetTimer,
     ReloadConfig,
-    ToggleChecklist,
     TogglePetVisibility,
     Quit,
 }
@@ -43,7 +42,6 @@ pub enum AppEvent {
     Petting,
     Feed { x: f64, y: f64 },
     TrackChanged(String),
-    TaskCompleted,
     WeatherChanged(WeatherCondition),
     WorkspaceChanged,
 }

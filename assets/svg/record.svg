@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Record outer ring -->
+  <circle 
+    cx="128" 
+    cy="128" 
+    r="112" 
+    fill="rgb(20, 20, 20)" 
+  />
+
+  <!-- Groove lines -->
+  <circle 
+    cx="128" 
+    cy="128" 
+    r="84" 
+    stroke="rgb(51, 51, 51)" 
+    stroke-width="7" 
+    fill="none" 
+  />
+  <circle 
+    cx="128" 
+    cy="128" 
+    r="56" 
+    stroke="rgb(51, 51, 51)" 
+    stroke-width="7" 
+    fill="none" 
+  />
+
+  <!-- Center label -->
+  <circle 
+    cx="128" 
+    cy="128" 
+    r="35" 
+    fill="rgb(230, 77, 153)" 
+  />
+
+  <!-- Center hole -->
+  <circle 
+    cx="128" 
+    cy="128" 
+    r="10.5" 
+    fill="rgb(31, 31, 31)" 
+  />
+</svg>

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Back Bread -->
+  <path 
+    d="M 28 208 L 208 208 L 118 48 Z" 
+    fill="rgb(217, 179, 128)" 
+  />
+
+  <!-- Green Layer (Lettuce) -->
+  <path 
+    d="M 48 188 L 188 188" 
+    stroke="rgb(77, 204, 51)" 
+    stroke-width="30" 
+    fill="none" 
+  />
+
+  <!-- Red Layer (Tomato/Meat) -->
+  <path 
+    d="M 78 168 L 158 168" 
+    stroke="rgb(230, 51, 51)" 
+    stroke-width="20" 
+    fill="none" 
+  />
+
+  <!-- Front Bread -->
+  <path 
+    d="M 48 208 L 228 208 L 138 68 Z" 
+    fill="rgb(230, 191, 140)" 
+  />
+</svg>

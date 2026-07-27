@@ -2,12 +2,6 @@ use crate::config::Config;
 use crate::event::ActiveWindowGeometry;
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ClimbSide {
-    Left,
-    Right,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum InteractionState {
     None,
@@ -21,12 +15,6 @@ pub enum InteractionState {
         target_x_rel: i32,
         dir_right: bool,
     },
-    Climbing {
-        y_rel: f64,
-        target_y_rel: i32,
-        side: ClimbSide,
-        dir_down: bool,
-    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -39,8 +27,6 @@ pub enum PetState {
     Petting,
     WalkingLeft,
     WalkingRight,
-    ClimbingUp,
-    ClimbingDown,
     Dancing,
     PortalOut,
     PortalIn,
@@ -295,13 +281,6 @@ impl PetAnimationState {
                     self.current_state = PetState::WalkingLeft;
                 }
             }
-            InteractionState::Climbing { dir_down, .. } => {
-                if *dir_down {
-                    self.current_state = PetState::ClimbingDown;
-                } else {
-                    self.current_state = PetState::ClimbingUp;
-                }
-            }
             _ => {
                 // 6. Cursor tracking
                 if let Some((dx, dy)) = cursor_moved_rapidly {
@@ -315,7 +294,7 @@ impl PetAnimationState {
         }
     }
 
-    pub fn update_interaction(&mut self, config: &Config, pet_size: i32, monitor_width: i32) {
+    pub fn update_interaction(&mut self, config: &Config, pet_size: i32) {
         if !config.pet.window_interaction {
             self.interaction_state = InteractionState::None;
             self.last_win_address = None;
@@ -351,7 +330,6 @@ impl PetAnimationState {
         }
 
         let win_w = active_window.width;
-        let win_h = active_window.height;
         let now = Instant::now();
 
         match self.interaction_state.clone() {
@@ -378,10 +356,6 @@ impl PetAnimationState {
                 if now.duration_since(start_time) >= Duration::from_secs(duration_secs as u64) {
                     let r = gtk4::glib::random_double();
 
-                    let win_x = active_window.x;
-                    let left_space = win_x > pet_size;
-                    let right_space = win_x + win_w + pet_size < monitor_width;
-
                     if r < 0.45 {
                         let max_x = (win_w - pet_size).max(0);
                         let target_x_rel = if max_x > 0 {
@@ -393,26 +367,6 @@ impl PetAnimationState {
                             x_rel: x_rel as f64,
                             target_x_rel,
                             dir_right: target_x_rel > x_rel,
-                        };
-                    } else if r < 0.80 && (left_space || right_space) {
-                        let side = if left_space && right_space {
-                            if gtk4::glib::random_double() < 0.5 {
-                                ClimbSide::Left
-                            } else {
-                                ClimbSide::Right
-                            }
-                        } else if left_space {
-                            ClimbSide::Left
-                        } else {
-                            ClimbSide::Right
-                        };
-
-                        let target_y_rel = (win_h - pet_size).max(0);
-                        self.interaction_state = InteractionState::Climbing {
-                            y_rel: 0.0,
-                            target_y_rel,
-                            side,
-                            dir_down: true,
                         };
                     } else {
                         self.interaction_state = InteractionState::Sitting {
@@ -455,47 +409,6 @@ impl PetAnimationState {
                     };
                 }
             }
-            InteractionState::Climbing {
-                mut y_rel,
-                target_y_rel,
-                side,
-                dir_down,
-            } => {
-                let max_y = (win_h - pet_size).max(0);
-                let target_y_rel = target_y_rel.clamp(0, max_y);
-                y_rel = y_rel.clamp(0.0, max_y as f64);
-
-                let diff = target_y_rel as f64 - y_rel;
-                let step = 1.8;
-                if diff.abs() <= step {
-                    if dir_down {
-                        self.interaction_state = InteractionState::Climbing {
-                            y_rel: target_y_rel as f64,
-                            target_y_rel: 0,
-                            side,
-                            dir_down: false,
-                        };
-                    } else {
-                        let x_rel = match side {
-                            ClimbSide::Left => 0,
-                            ClimbSide::Right => (win_w - pet_size).max(0),
-                        };
-                        self.interaction_state = InteractionState::Sitting {
-                            x_rel,
-                            duration_secs: gtk4::glib::random_int_range(5, 12) as u32,
-                            start_time: now,
-                        };
-                    }
-                } else {
-                    y_rel += step * diff.signum();
-                    self.interaction_state = InteractionState::Climbing {
-                        y_rel,
-                        target_y_rel,
-                        side,
-                        dir_down,
-                    };
-                }
-            }
         }
     }
 
@@ -513,12 +426,6 @@ impl PetAnimationState {
             }
             PetState::WalkingLeft => {
                 return (1 * frame_size, 3 * frame_size);
-            }
-            PetState::ClimbingUp => {
-                return (2 * frame_size, 3 * frame_size);
-            }
-            PetState::ClimbingDown => {
-                return (3 * frame_size, 3 * frame_size);
             }
             PetState::Tracking { dx, dy } => {
                 let col = if dx.abs() > dy.abs() {
@@ -555,7 +462,6 @@ impl PetAnimationState {
             PetState::Idle => 150,
             PetState::Tracking { .. } => 150,
             PetState::WalkingLeft | PetState::WalkingRight => 100,
-            PetState::ClimbingUp | PetState::ClimbingDown => 120,
             PetState::Dancing => 160,
             PetState::PortalOut | PetState::PortalIn => 100,
             PetState::Dragged => 80,

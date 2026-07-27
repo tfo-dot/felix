@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Cap body -->
+  <path 
+    d="M 48 228 C 88 88, 108 68, 128 60 L 208 208 Z" 
+    fill="rgb(89, 77, 179)" 
+  />
+
+  <!-- White brim -->
+  <path 
+    d="M 32 228 L 224 212" 
+    stroke="rgb(242, 242, 242)" 
+    stroke-width="24" 
+    stroke-linecap="butt" 
+    fill="none" 
+  />
+
+  <!-- Pompom -->
+  <circle 
+    cx="128" 
+    cy="44" 
+    r="24" 
+    fill="rgb(242, 242, 242)" 
+  />
+</svg>

@@ -46,7 +46,6 @@ impl Tray for PetTray {
         let tx4 = self.tx.clone();
         let tx5 = self.tx.clone();
 
-        let tx_checklist = self.tx.clone();
         vec![
             StandardItem {
                 label: "Toggle Pomodoro Pause".into(),
@@ -60,14 +59,6 @@ impl Tray for PetTray {
                 label: "Reset Pomodoro".into(),
                 activate: Box::new(move |_| {
                     let _ = tx2.send(AppEvent::Tray(TrayAction::ResetTimer));
-                }),
-                ..Default::default()
-            }
-            .into(),
-            StandardItem {
-                label: "Toggle Checklist".into(),
-                activate: Box::new(move |_| {
-                    let _ = tx_checklist.send(AppEvent::Tray(TrayAction::ToggleChecklist));
                 }),
                 ..Default::default()
             }
