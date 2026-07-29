@@ -80,8 +80,6 @@ pub struct PetWindow {
 pub struct Assets {
     x: i32,
     y: i32,
-    width: i32,
-    height: i32,
     name: String,
 }
 
@@ -90,7 +88,9 @@ pub struct PetMeta {
     x: f64,
     y: f64,
     rotation: f64,
-    scale: f64,
+    tile_col: i64,
+    tile_row: i64,
+    tile_index: i64,
 }
 
 const PET_SPRITESHEET_BYTES: &[u8] = include_bytes!("../../assets/pet_spritesheet.png");
@@ -441,43 +441,51 @@ impl PetWindow {
                     .map(|dt| dt.hour())
                     .unwrap_or(12);
 
-                let draw_asset = |asset_id: String,
-                                  attach_location: String,
-                                  anchor_x: f64,
-                                  anchor_y: f64| {
-                    let asset = assets_meta_clone
-                        .iter()
-                        .find(|a| a.name == asset_id)
-                        .unwrap();
+                let draw_asset =
+                    |asset_id: String, attach_location: String, anchor_x: f64, anchor_y: f64| {
+                        let asset = assets_meta_clone
+                            .iter()
+                            .find(|a| a.name == asset_id)
+                            .unwrap();
 
-                    let entry = pet_meta_clone
-                        .get(&attach_location)
-                        .unwrap()
-                        .get(((fx / 256) + ((fy * 4) / 256)) as usize)
-                        .unwrap_or(&PetMeta {
-                            x: 0.0,
-                            y: 0.0,
-                            rotation: 0.0,
-                            scale: 1.0,
-                        });
+                        let entry = pet_meta_clone
+                            .get(&attach_location)
+                            .unwrap()
+                            .get(((fx / 256) + ((fy * 4) / 256)) as usize);
 
-                    cr.save().unwrap();
+                        if entry.is_some() {
+                            let entry = entry.unwrap();
 
-                    cr.translate(entry.x, entry.y);
-                    cr.rotate(entry.rotation);
-                    cr.scale(entry.scale, entry.scale);
-                    cr.translate(-anchor_x, -anchor_y);
+                            let scale = match attach_location.as_str() {
+                                "head" => 0.3,
+                                "eyes" => 0.5,
+                                "neck" => 0.45,
+                                "left_paw" => 0.5,
+                                _ => 1.0
+                            };
 
-                    cr.set_source_surface(&assets_surface_clone, -asset.x as f64, -asset.y as f64)
-                        .unwrap();
-                    cr.set_operator(cairo::Operator::Over);
+                            cr.save().unwrap();
 
-                    cr.rectangle(0.0, 0.0, 256.0, 256.0);
-                    cr.clip();
-                    cr.paint().unwrap();
+                            cr.translate(entry.x, entry.y);
+                            cr.rotate(entry.rotation);
+                            cr.scale(scale, scale);
+                            cr.translate(-anchor_x, -anchor_y);
 
-                    cr.restore().unwrap();
-                };
+                            cr.set_source_surface(
+                                &assets_surface_clone,
+                                -asset.x as f64,
+                                -asset.y as f64,
+                            )
+                            .unwrap();
+                            cr.set_operator(cairo::Operator::Over);
+
+                            cr.rectangle(0.0, 0.0, 256.0, 256.0);
+                            cr.clip();
+                            cr.paint().unwrap();
+
+                            cr.restore().unwrap();
+                        }
+                    };
 
                 if (hour >= 21 || hour < 6) && current_state == PetState::Sleeping {
                     draw_asset("sleeping_hat".to_string(), "head".to_string(), 128.0, 220.0);

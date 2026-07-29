@@ -1,0 +1,82 @@
+[
+  {
+    "x": 0,
+    "y": 0,
+    "name": "book"
+  },
+  {
+    "x": 256,
+    "y": 0,
+    "name": "browser"
+  },
+  {
+    "x": 512,
+    "y": 0,
+    "name": "coffee_cup"
+  },
+  {
+    "x": 768,
+    "y": 0,
+    "name": "discord"
+  },
+  {
+    "x": 1024,
+    "y": 0,
+    "name": "minecraft"
+  },
+  {
+    "x": 1280,
+    "y": 0,
+    "name": "record"
+  },
+  {
+    "x": 1536,
+    "y": 0,
+    "name": "reverse1999_clock"
+  },
+  {
+    "x": 1792,
+    "y": 0,
+    "name": "sandwich"
+  },
+  {
+    "x": 0,
+    "y": 256,
+    "name": "scarf"
+  },
+  {
+    "x": 256,
+    "y": 256,
+    "name": "sleeping_hat"
+  },
+  {
+    "x": 512,
+    "y": 256,
+    "name": "spotify"
+  },
+  {
+    "x": 768,
+    "y": 256,
+    "name": "steam"
+  },
+  {
+    "x": 1024,
+    "y": 256,
+    "name": "sunglasses"
+  },
+  {
+    "x": 1280,
+    "y": 256,
+    "name": "terminal"
+  },
+  {
+    "x": 1536,
+    "y": 256,
+    "name": "umbrella"
+  },
+  {
+    "x": 1792,
+    "y": 256,
+    "name": "vscode"
+  }
+]
