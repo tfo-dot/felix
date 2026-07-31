@@ -5,7 +5,53 @@ use crate::ui::bubble::SpeechBubble;
 use cairo::{Context, Format, ImageSurface, LinearGradient, RadialGradient};
 use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
+#[cfg(target_os = "linux")]
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+
+#[cfg(not(target_os = "linux"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Edge {
+    Bottom,
+    Left,
+    Right,
+    Top,
+}
+
+#[cfg(not(target_os = "linux"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyboardMode {
+    None,
+}
+
+#[cfg(not(target_os = "linux"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layer {
+    Overlay,
+}
+
+#[cfg(not(target_os = "linux"))]
+pub trait LayerShell {
+    fn init_layer_shell(&self);
+    fn set_layer(&self, layer: Layer);
+    fn set_keyboard_mode(&self, mode: KeyboardMode);
+    fn set_namespace(&self, namespace: Option<&str>);
+    fn set_exclusive_zone(&self, zone: i32);
+    fn set_anchor(&self, edge: Edge, anchor: bool);
+    fn set_margin(&self, edge: Edge, margin: i32);
+    fn set_monitor(&self, monitor: Option<&gtk4::gdk::Monitor>);
+}
+
+#[cfg(not(target_os = "linux"))]
+impl LayerShell for gtk4::ApplicationWindow {
+    fn init_layer_shell(&self) {}
+    fn set_layer(&self, _layer: Layer) {}
+    fn set_keyboard_mode(&self, _mode: KeyboardMode) {}
+    fn set_namespace(&self, _namespace: Option<&str>) {}
+    fn set_exclusive_zone(&self, _zone: i32) {}
+    fn set_anchor(&self, _edge: Edge, _anchor: bool) {}
+    fn set_margin(&self, _edge: Edge, _margin: i32) {}
+    fn set_monitor(&self, _monitor: Option<&gtk4::gdk::Monitor>) {}
+}
 use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -214,6 +260,22 @@ impl PetWindow {
         window.connect_realize(|window| {
             if let Some(surface) = window.surface() {
                 surface.set_opaque_region(None::<&cairo::Region>);
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let title: Vec<u16> = "Felix Desktop Pet\0".encode_utf16().collect();
+                unsafe {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+                    let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+                    if hwnd != 0 {
+                        let mut style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+                        style |= WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
+                        SetWindowLongW(hwnd, GWL_EXSTYLE, style as i32);
+                        
+                        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, 
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+                    }
+                }
             }
         });
 

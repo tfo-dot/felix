@@ -1,11 +1,14 @@
-use crate::event::{AppEvent, InputEvent};
+#[cfg(target_os = "linux")]
 use evdev::{Device, KeyCode};
-use std::fs;
+use crate::event::{AppEvent, InputEvent};
 use std::sync::mpsc::Sender;
-use std::thread;
-use std::time::Duration;
 
+#[cfg(target_os = "linux")]
 pub fn spawn_keyboard_tracker(tx: Sender<AppEvent>) {
+    use std::fs;
+    use std::thread;
+    use std::time::Duration;
+
     thread::spawn(move || {
         let mut keyboard_paths = Vec::new();
 
@@ -69,4 +72,9 @@ pub fn spawn_keyboard_tracker(tx: Sender<AppEvent>) {
             });
         }
     });
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn spawn_keyboard_tracker(_tx: Sender<AppEvent>) {
+    log::warn!("Keyboard tracking is not supported on this platform. Typing animations will be disabled.");
 }

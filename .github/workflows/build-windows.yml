@@ -1,0 +1,70 @@
+name: Build Windows Release
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Set up Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: x86_64-pc-windows-msvc
+
+    - name: Cache GTK4 build
+      id: cache-gtk
+      uses: actions/cache@v4
+      with:
+        path: C:\gtk-build
+        key: gvsbuild-gtk4-v1
+
+    - name: Install gvsbuild and compile GTK4
+      if: steps.cache-gtk.outputs.cache-hit != 'true'
+      run: |
+        pip install gvsbuild
+        gvsbuild build gtk4
+
+    - name: Build release binary
+      run: |
+        $env:PKG_CONFIG_PATH = "C:\gtk-build\gtk\x64\release\lib\pkgconfig"
+        $env:PATH = "C:\gtk-build\gtk\x64\release\bin;" + $env:PATH
+        $env:LIB = "C:\gtk-build\gtk\x64\release\lib;" + $env:LIB
+        cargo build --release
+
+    - name: Package release artifact
+      run: |
+        # Create staging directory
+        New-Item -ItemType Directory -Force -Path felix-windows
+        
+        # Copy executable
+        Copy-Item -Path target\release\felix.exe -Destination felix-windows\
+        
+        # Copy assets
+        Copy-Item -Path assets -Destination felix-windows\ -Recurse
+        
+        # Copy all GTK DLLs
+        Copy-Item -Path C:\gtk-build\gtk\x64\release\bin\*.dll -Destination felix-windows\
+
+    - name: Compress release package
+      run: |
+        Compress-Archive -Path felix-windows -DestinationPath felix-windows.zip -Force
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: felix-windows
+        path: felix-windows.zip

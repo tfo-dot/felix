@@ -7,10 +7,13 @@ mod ui;
 
 use config::{load_or_create_config, watch_config};
 use event::{AppEvent, InputEvent, TrayAction, WeatherCondition};
-use gtk4_layer_shell::LayerShell;
-#[cfg(feature = "hyprland")]
+#[cfg(all(target_os = "linux", feature = "hyprland"))]
 use input::hyprland::{spawn_active_window_poller, spawn_cursor_poller, spawn_event_listener};
 use input::keyboard::spawn_keyboard_tracker;
+#[cfg(target_os = "linux")]
+use gtk4_layer_shell::LayerShell;
+#[cfg(not(target_os = "linux"))]
+use ui::window::LayerShell;
 use reqwest::Url;
 use reqwest::blocking::Client;
 use state::{PetAnimationState, PetState, PomodoroState, PomodoroTimer};
@@ -53,7 +56,7 @@ fn main() {
 
         let (tx, rx) = std::sync::mpsc::channel::<AppEvent>();
 
-        #[cfg(feature = "hyprland")]
+        #[cfg(all(target_os = "linux", feature = "hyprland"))]
         {
             if input::hyprland::is_hyprland_available() {
                 spawn_event_listener(tx.clone());
@@ -64,12 +67,17 @@ fn main() {
             }
         }
 
-        #[cfg(not(feature = "hyprland"))]
+        #[cfg(not(all(target_os = "linux", feature = "hyprland")))]
         {
-            log::info!("Hyprland support compiled out. Disabling window interaction and active window polling.");
+            log::info!("Hyprland support compiled out or not supported on this platform. Disabling window interaction and active window polling.");
         }
 
         spawn_keyboard_tracker(tx.clone());
+
+        #[cfg(target_os = "windows")]
+        {
+            input::windows::spawn_windows_poller(tx.clone());
+        }
 
         let ha_addres = std::sync::Arc::new(std::sync::RwLock::new(config.borrow().ha_address.clone()));
         let ha_addres_poller = ha_addres.clone();

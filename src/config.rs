@@ -106,8 +106,11 @@ impl Default for Config {
 }
 
 pub fn get_config_path() -> PathBuf {
-    let home = std::env::var("HOME").expect("Home should be defined");
-    PathBuf::from(home).join(".config/pet-app/config.toml")
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .or_else(|_| std::env::var("HOMEPATH"))
+        .expect("Home directory (HOME or USERPROFILE or HOMEPATH) should be defined");
+    PathBuf::from(home).join(".config").join("pet-app").join("config.toml")
 }
 
 pub fn load_or_create_config() -> Config {
