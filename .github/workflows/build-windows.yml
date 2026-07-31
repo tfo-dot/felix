@@ -25,6 +25,11 @@ jobs:
       with:
         targets: x86_64-pc-windows-msvc
 
+    - name: Install cargo-c (prebuilt)
+      run: |
+        Invoke-WebRequest -Uri "https://github.com/lu-zero/cargo-c/releases/latest/download/cargo-c-windows-msvc.zip" -OutFile cargo-c.zip
+        Expand-Archive -Path cargo-c.zip -DestinationPath "$env:USERPROFILE\.cargo\bin" -Force
+
     - name: Cache GTK4 build
       id: cache-gtk
       uses: actions/cache@v4
