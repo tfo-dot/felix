@@ -36,14 +36,31 @@ pub struct Config {
     pub anchor: AnchorConfig,
     pub pet: PetConfig,
     pub pomodoro: PomodoroConfig,
-    #[serde(default = "default_checklist_visible")]
-    pub checklist_visible: bool,
     pub ha_address: String,
     pub ha_key: String,
+    pub texture: Vec<LayerEntry>,
 }
 
-fn default_checklist_visible() -> bool {
-    true
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub enum ColorMode {
+    Static {
+        r: f64,
+        g: f64,
+        b: f64,
+    },
+    Linear {
+        angle_deg: f64,
+        stops: Vec<(f64, f64, f64, f64)>,
+    },
+    Radial {
+        stops: Vec<(f64, f64, f64, f64)>,
+    },
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct LayerEntry {
+    pub color: ColorMode,
+    pub layer: String,
 }
 
 impl Default for Config {
@@ -71,7 +88,17 @@ impl Default for Config {
                 long_break_mins: 15,
                 start_paused: true,
             },
-            checklist_visible: true,
+            texture: vec![LayerEntry {
+                color: ColorMode::Static {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                },
+                layer: "Lineart".to_string(),
+            }, LayerEntry {
+                color: ColorMode::Static { r: 250.0, g: 150.0, b: 40.0 },
+                layer: "BaseColor".to_string()
+            }],
             ha_address: "".to_string(),
             ha_key: "".to_string(),
         }

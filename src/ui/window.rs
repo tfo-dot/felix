@@ -1,12 +1,16 @@
-use crate::config::Config;
+use crate::config::{ColorMode, Config};
 use crate::event::{AppEvent, InputEvent, TrayAction};
 use crate::state::RoutineState;
 use crate::ui::bubble::SpeechBubble;
+use cairo::{Context, Format, ImageSurface, LinearGradient, RadialGradient};
+use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Cursor;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
@@ -93,20 +97,15 @@ pub struct PetMeta {
     tile_index: i64,
 }
 
-const PET_SPRITESHEET_BYTES: &[u8] = include_bytes!("../../assets/pet_spritesheet.png");
 const PET_JSON_META: &[u8] = include_bytes!("../../assets/pet_meta.json");
-const WUTHERING_TERMINAL_BYTES: &[u8] = include_bytes!("../../assets/wuthering_terminal.png");
 const ASSETS_SPRITESHEET_BYTES: &[u8] = include_bytes!("../../assets/assets_spritesheet.png");
 const ASSETS_SPRITESHEET_JSON_BYTES: &[u8] = include_bytes!("../../assets/assets_spritesheet.json");
 
-fn load_surface(
-    file_path: &str,
-    embedded_bytes: &'static [u8],
-) -> Option<gtk4::cairo::ImageSurface> {
+fn load_surface(file_path: &str, embedded_bytes: &'static [u8]) -> Option<ImageSurface> {
     // Try local file first
-    if let Ok(mut file) = std::fs::File::open(file_path) {
+    if let Ok(mut file) = File::open(file_path) {
         log::info!("Loading asset from filesystem: {}", file_path);
-        match gtk4::cairo::ImageSurface::create_from_png(&mut file) {
+        match ImageSurface::create_from_png(&mut file) {
             Ok(surf) => return Some(surf),
             Err(e) => {
                 log::error!("Failed to parse PNG from {}: {:?}", file_path, e);
@@ -116,8 +115,8 @@ fn load_surface(
 
     // Fallback to embedded bytes
     log::info!("Loading embedded asset for {}", file_path);
-    let mut cursor = std::io::Cursor::new(embedded_bytes);
-    match gtk4::cairo::ImageSurface::create_from_png(&mut cursor) {
+    let mut cursor = Cursor::new(embedded_bytes);
+    match ImageSurface::create_from_png(&mut cursor) {
         Ok(surf) => Some(surf),
         Err(e) => {
             log::error!("Failed to parse embedded PNG for {}: {:?}", file_path, e);
@@ -126,12 +125,82 @@ fn load_surface(
     }
 }
 
+fn set_color_source(ctx: &Context, mode: &ColorMode, w: f64, h: f64) {
+    match mode {
+        ColorMode::Static { r, g, b } => {
+            ctx.set_source_rgb(*r / 255.0, *g / 255.0, *b / 255.0);
+        }
+        ColorMode::Linear { angle_deg, stops } => {
+            let angle = angle_deg.to_radians();
+            let (cx, cy) = (w / 2.0, h / 2.0);
+            let len = w.hypot(h) / 2.0;
+            let (dx, dy) = (angle.cos() * len, angle.sin() * len);
+            let grad = LinearGradient::new(cx - dx, cy - dy, cx + dx, cy + dy);
+            for (offset, r, g, b) in stops {
+                grad.add_color_stop_rgb(*offset, *r, *g, *b);
+            }
+            ctx.set_source(&grad).unwrap();
+        }
+        ColorMode::Radial { stops } => {
+            let grad = RadialGradient::new(w / 2.0, h / 2.0, 0.0, w / 2.0, h / 2.0, w.max(h) / 2.0);
+            for (offset, r, g, b) in stops {
+                grad.add_color_stop_rgb(*offset, *r, *g, *b);
+            }
+            ctx.set_source(&grad).unwrap();
+        }
+    }
+}
+
+fn colorize_cell(sheet: &Pixbuf, col: i32, row: i32, mode: &ColorMode) -> ImageSurface {
+    let surface = ImageSurface::create(Format::ARgb32, 1024, 1024).unwrap();
+    let ctx = Context::new(&surface).unwrap();
+
+    ctx.set_source_pixbuf(sheet, -(col * 256) as f64, -(row * 256) as f64);
+    let mask_pattern = ctx.source();
+
+    set_color_source(&ctx, mode, 256 as f64, 256 as f64);
+
+    ctx.mask(&mask_pattern).unwrap();
+
+    surface
+}
+
+fn compose_sheet(layers: &[ImageSurface]) -> ImageSurface {
+    let out = ImageSurface::create(Format::ARgb32, 1024, 1024).unwrap();
+    let ctx = Context::new(&out).unwrap();
+
+    for layer in layers {
+        ctx.set_operator(cairo::Operator::Over);
+        ctx.set_source_surface(layer, 0.0, 0.0).unwrap();
+        ctx.paint().unwrap();
+    }
+
+    out
+}
+
+fn build_colorized_sheet(sheet: &Pixbuf, mode: &ColorMode) -> ImageSurface {
+    let out = ImageSurface::create(Format::ARgb32, 1024, 1024).unwrap();
+    let ctx = Context::new(&out).unwrap();
+
+    for row in 0..4 {
+        for col in 0..4 {
+            let cell = colorize_cell(sheet, col, row, mode);
+            ctx.set_source_surface(&cell, (col * 256) as f64, (row * 256) as f64)
+                .unwrap();
+            ctx.paint().unwrap();
+        }
+    }
+
+    out
+}
+
 impl PetWindow {
     pub fn new(app: &gtk4::Application, config: &Config, tx: Sender<AppEvent>) -> Self {
         let window = gtk4::ApplicationWindow::builder()
             .application(app)
             .title("Felix Desktop Pet")
             .build();
+
         window.add_css_class("pet-window-class");
 
         window.init_layer_shell();
@@ -150,10 +219,19 @@ impl PetWindow {
 
         update_window_properties(&window, config);
 
-        let surface = load_surface("assets/pet_spritesheet.png", PET_SPRITESHEET_BYTES);
+        let mut buffers = vec![];
 
-        let wuthering_surface =
-            load_surface("assets/wuthering_terminal.png", WUTHERING_TERMINAL_BYTES);
+        for layer in &config.texture.clone() {
+            let path = format!("assets/layers/{}.png", layer.layer);
+
+            log::info!("Loading asset from filesystem: {}", path);
+
+            let pb = Pixbuf::from_file(path).unwrap();
+
+            buffers.push(build_colorized_sheet(&pb, &layer.color));
+        }
+
+        let surface = Some(compose_sheet(&buffers));
 
         let assets_surface =
             load_surface("assets/assets_spritesheet.png", ASSETS_SPRITESHEET_BYTES);
@@ -184,9 +262,8 @@ impl PetWindow {
             .width_request(config.pet.size)
             .height_request(config.pet.size)
             .halign(gtk4::Align::Center)
+            .can_target(false)
             .build();
-
-        prop_overlay.set_can_target(false);
 
         let motion = gtk4::EventControllerMotion::new();
         let tx_motion = tx.clone();
@@ -318,13 +395,10 @@ impl PetWindow {
                 use crate::state::PetState;
                 match current_state {
                     PetState::WalkingLeft | PetState::WalkingRight => {
-                        // Bob up and down (feet stepping)
                         offset_y = 6.0 * (elapsed_ms / 120.0).sin().abs();
-                        // Wobble side to side
                         rotation = 0.06 * (elapsed_ms / 100.0).sin();
                     }
                     PetState::Dancing => {
-                        // Bouncy dance!
                         offset_y = 12.0 * (elapsed_ms / 90.0).sin().abs() - 6.0;
                         rotation = 0.18 * (elapsed_ms / 100.0).sin();
                     }
@@ -356,7 +430,6 @@ impl PetWindow {
                     _ => {}
                 }
 
-                // Draw the portal vortex under Felix's feet if in portal state
                 if current_state == PetState::PortalOut || current_state == PetState::PortalIn {
                     cr.save().unwrap();
                     let vortex_max_radius = 45.0;
@@ -426,42 +499,39 @@ impl PetWindow {
                     cr.translate(-128.0, -160.0);
                 }
 
-                // Clip drawing to a single 256x256 frame
                 cr.rectangle(0.0, 0.0, 256.0, 256.0);
                 cr.clip();
 
-                // Draw surface offset by current frame coordinates
                 cr.set_source_surface(&surf_clone, -fx as f64, -fy as f64)
                     .unwrap();
                 cr.set_operator(cairo::Operator::Over);
                 cr.paint_with_alpha(portal_opacity).unwrap();
 
-                // Draw accessories that attach to the pet (bobbing and rotating with it)
                 let hour = gtk4::glib::DateTime::now_local()
                     .map(|dt| dt.hour())
                     .unwrap_or(12);
 
                 let draw_asset =
-                    |asset_id: String, attach_location: String, anchor_x: f64, anchor_y: f64| {
+                    |asset_id: &str, attach_location: &str, anchor_x: f64, anchor_y: f64| {
                         let asset = assets_meta_clone
                             .iter()
                             .find(|a| a.name == asset_id)
                             .unwrap();
 
                         let entry = pet_meta_clone
-                            .get(&attach_location)
+                            .get(attach_location)
                             .unwrap()
                             .get(((fx / 256) + ((fy * 4) / 256)) as usize);
 
                         if entry.is_some() {
                             let entry = entry.unwrap();
 
-                            let scale = match attach_location.as_str() {
+                            let scale = match attach_location {
                                 "head" => 0.3,
                                 "eyes" => 0.5,
                                 "neck" => 0.45,
                                 "left_paw" => 0.5,
-                                _ => 1.0
+                                _ => 1.0,
                             };
 
                             cr.save().unwrap();
@@ -488,23 +558,18 @@ impl PetWindow {
                     };
 
                 if (hour >= 21 || hour < 6) && current_state == PetState::Sleeping {
-                    draw_asset("sleeping_hat".to_string(), "head".to_string(), 128.0, 220.0);
+                    draw_asset("sleeping_hat", "head", 128.0, 220.0);
                 }
 
                 match *current_weather_clone.borrow() {
                     crate::event::WeatherCondition::Sunny => {
-                        draw_asset("sunglasses".to_string(), "eyes".to_string(), 128.0, 128.0);
+                        draw_asset("sunglasses", "eyes", 128.0, 128.0);
                     }
                     crate::event::WeatherCondition::Snowy => {
-                        draw_asset("scarf".to_string(), "neck".to_string(), 128.0, 90.0);
+                        draw_asset("scarf", "neck", 128.0, 90.0);
                     }
                     crate::event::WeatherCondition::Rainy => {
-                        draw_asset(
-                            "umbrella".to_string(),
-                            "left_space".to_string(),
-                            134.0,
-                            222.0,
-                        );
+                        draw_asset("umbrella", "left_space", 134.0, 222.0);
                     }
                     _ => (),
                 }
@@ -513,23 +578,13 @@ impl PetWindow {
                 if current_state == PetState::Idle {
                     match routine {
                         RoutineState::Coffee => {
-                            draw_asset(
-                                "coffee_cup".to_string(),
-                                "left_paw".to_string(),
-                                143.0,
-                                143.0,
-                            );
+                            draw_asset("coffee_cup", "left_paw", 143.0, 143.0);
                         }
                         RoutineState::Lunch => {
-                            draw_asset(
-                                "sandwich".to_string(),
-                                "left_paw".to_string(),
-                                128.0,
-                                208.0,
-                            );
+                            draw_asset("sandwich", "left_paw", 128.0, 208.0);
                         }
                         RoutineState::Reading => {
-                            draw_asset("book".to_string(), "left_paw".to_string(), 128.0, 163.0);
+                            draw_asset("book", "left_paw", 128.0, 163.0);
                         }
                         _ => {}
                     }
@@ -537,7 +592,6 @@ impl PetWindow {
 
                 cr.restore().unwrap();
 
-                // Render floating hearts in the absolute drawing area bounds
                 let hearts_list = hearts_clone.borrow();
                 for heart in hearts_list.iter() {
                     cr.save().unwrap();
@@ -573,9 +627,7 @@ impl PetWindow {
             });
         }
 
-        // Draw func for prop_overlay
         {
-            let wuthering_surf_clone = wuthering_surface.clone();
             let active_prop_clone = active_prop.clone();
             let prop_particles_clone = prop_particles.clone();
             let pet_scale_clone = pet_scale.clone();
@@ -596,7 +648,7 @@ impl PetWindow {
                 let s = scale_val * (size_val as f64 / 256.0);
                 cr.scale(s, s);
 
-                let draw_asset = |asset_id: String,
+                let draw_asset = |asset_id: &str,
                                   pos_x: f64,
                                   pos_y: f64,
                                   anchor_x: f64,
@@ -623,92 +675,64 @@ impl PetWindow {
                     cr.restore().unwrap();
                 };
 
-                // Draw active window props
                 if active != ActiveProp::None {
                     match active {
                         ActiveProp::WutheringWaves => {
-                            // Draw Wuthering Waves Gourd Terminal
-                            if let Some(ref surf) = wuthering_surf_clone {
-                                cr.save().unwrap();
+                            let bob_y = 5.0 * (elapsed_ms / 300.0).sin();
 
-                                // Terminal floats and bobs
-                                let bob_y = 5.0 * (elapsed_ms / 300.0).sin();
-                                let rot = 0.05 * (elapsed_ms / 400.0).cos();
+                            draw_asset("wuthering_waves_gourd", 40.0, 90.0 + bob_y, 0.0, 0.0);
 
-                                // Position it next to the pet (top right: x = 185.0, y = 85.0)
-                                let tx = 185.0;
-                                let ty = 85.0 + bob_y;
+                            let tx = 185.0;
+                            let ty = 85.0 + bob_y;
 
-                                cr.translate(tx, ty);
-                                cr.rotate(rot);
-
-                                let surf_w = surf.width() as f64;
-                                let surf_h = surf.height() as f64;
-                                let target_sz = 60.0;
-                                let img_scale = target_sz / surf_w.max(surf_h);
-
-                                cr.scale(img_scale, img_scale);
-                                cr.set_source_surface(surf, -surf_w / 2.0, -surf_h / 2.0)
-                                    .unwrap();
-                                cr.paint().unwrap();
-                                cr.restore().unwrap();
-
-                                // Cyan soundwave/echo ripples expanding from the gourd
-                                cr.save().unwrap();
-                                cr.set_line_width(1.5);
-                                let ripple_count = 3;
-                                for i in 0..ripple_count {
-                                    let phase = ((elapsed_ms / 10.0) + (i as f64 * 40.0)) % 120.0;
-                                    let radius = 10.0 + phase * 0.4;
-                                    let alpha = (1.0 - phase / 120.0).clamp(0.0, 1.0) * 0.4;
-                                    cr.set_source_rgba(0.0, 0.9, 1.0, alpha);
-                                    cr.arc(tx, ty, radius, 0.0, 2.0 * std::f64::consts::PI);
-                                    cr.stroke().unwrap();
-                                }
-                                cr.restore().unwrap();
+                            cr.save().unwrap();
+                            cr.set_line_width(1.5);
+                            let ripple_count = 3;
+                            for i in 0..ripple_count {
+                                let phase = ((elapsed_ms / 10.0) + (i as f64 * 40.0)) % 120.0;
+                                let radius = 10.0 + phase * 0.4;
+                                let alpha = (1.0 - phase / 120.0).clamp(0.0, 1.0) * 0.4;
+                                cr.set_source_rgba(0.0, 0.9, 1.0, alpha);
+                                cr.arc(tx, ty, radius, 0.0, 2.0 * std::f64::consts::PI);
+                                cr.stroke().unwrap();
                             }
+                            cr.restore().unwrap();
                         }
                         ActiveProp::Reverse1999 => {
                             let bob_y = 4.0 * (elapsed_ms / 250.0).cos();
 
-                            draw_asset(
-                                "reverse1999_clock".to_string(),
-                                40.0,
-                                90.0 + bob_y,
-                                128.0,
-                                140.0,
-                            );
+                            draw_asset("reverse1999_clock", 40.0, 90.0 + bob_y, 128.0, 140.0);
                         }
                         ActiveProp::SublimeKitty => {
-                            draw_asset("terminal".to_string(), 165.0, 175.0, 128.0, 128.0);
+                            draw_asset("terminal", 165.0, 175.0, 128.0, 128.0);
                         }
                         ActiveProp::VSCode => {
                             let bob_y = 4.0 * (elapsed_ms / 300.0).sin();
 
-                            draw_asset("vscode".to_string(), 200.0, 85.0 + bob_y, 128.0, 128.0);
+                            draw_asset("vscode", 200.0, 85.0 + bob_y, 128.0, 128.0);
                         }
                         ActiveProp::Browser => {
                             let bob_y = 4.0 * (elapsed_ms / 350.0).sin();
 
-                            draw_asset("browser".to_string(), 200.0, 85.0 + bob_y, 128.0, 128.0);
+                            draw_asset("browser", 200.0, 85.0 + bob_y, 128.0, 128.0);
                         }
                         ActiveProp::Discord => {
-                            draw_asset("discord".to_string(), 200.0, 100.0, 128.0, 128.0);
+                            draw_asset("discord", 200.0, 100.0, 128.0, 128.0);
                         }
                         ActiveProp::Minecraft => {
                             let bob_y = 3.0 * (elapsed_ms / 400.0).sin();
 
-                            draw_asset("minecraft".to_string(), 200.0, 85.0 + bob_y, 128.0, 128.0);
+                            draw_asset("minecraft", 200.0, 85.0 + bob_y, 128.0, 128.0);
                         }
                         ActiveProp::Steam => {
                             let bob_y = 4.0 * (elapsed_ms / 300.0).sin();
 
-                            draw_asset("steam".to_string(), 200.0, 85.0 + bob_y, 128.0, 128.0);
+                            draw_asset("steam", 200.0, 85.0 + bob_y, 128.0, 128.0);
                         }
                         ActiveProp::Spotify => {
                             let bob_y = 4.0 * (elapsed_ms / 250.0).sin();
 
-                            draw_asset("spotify".to_string(), 200.0, 85.0 + bob_y, 128.0, 128.0);
+                            draw_asset("spotify", 200.0, 85.0 + bob_y, 128.0, 128.0);
                         }
                         _ => {}
                     }
@@ -719,7 +743,7 @@ impl PetWindow {
                 if current_state == PetState::Dancing && active == ActiveProp::None {
                     let bob_y = 6.0 * (elapsed_ms / 200.0).cos();
 
-                    draw_asset("record".to_string(), 200.0, 110.0 + bob_y, 128.0, 128.0);
+                    draw_asset("record", 200.0, 110.0 + bob_y, 128.0, 128.0);
                 }
 
                 let particles = prop_particles_clone.borrow();
@@ -948,7 +972,6 @@ impl PetWindow {
         let provider = gtk4::CssProvider::new();
         provider.load_from_data(
             "
-            /* Force transparency on window containers, drawing areas, boxes and overlays using high specificity class chains */
             window.pet-window-class,
             window.pet-window-class box,
             window.pet-window-class drawingarea,
@@ -959,7 +982,6 @@ impl PetWindow {
                 border: none;
             }
             
-            /* Fallback generic overrides */
             window, window.background, .background, .csd, .ssd, .titlebar, headerbar, drawingarea, box, overlay {
                 background-color: rgba(0,0,0,0);
                 background-image: none;
@@ -1049,20 +1071,4 @@ pub fn update_window_properties(window: &gtk4::ApplicationWindow, config: &Confi
     window.set_margin(Edge::Right, config.anchor.margin_right);
     window.set_margin(Edge::Top, config.anchor.margin_top);
     window.set_margin(Edge::Left, config.anchor.margin_left);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_load_surface_embedded_fallback() {
-        let _ = env_logger::builder().is_test(true).try_init();
-
-        let surface = load_surface("non_existent_file.png", PET_SPRITESHEET_BYTES);
-        assert!(surface.is_some());
-
-        let surface_wuthering = load_surface("non_existent_file.png", WUTHERING_TERMINAL_BYTES);
-        assert!(surface_wuthering.is_some());
-    }
 }

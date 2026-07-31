@@ -78,5 +78,10 @@
     "x": 1792,
     "y": 256,
     "name": "vscode"
+  },
+  {
+    "x": 0,
+    "y": 512,
+    "name": "wuthering_waves_gourd"
   }
 ]
