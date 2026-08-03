@@ -88,17 +88,24 @@ impl Default for Config {
                 long_break_mins: 15,
                 start_paused: true,
             },
-            texture: vec![LayerEntry {
-                color: ColorMode::Static {
-                    r: 0.0,
-                    g: 0.0,
-                    b: 0.0,
+            texture: vec![
+                LayerEntry {
+                    color: ColorMode::Static {
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                    },
+                    layer: "Lineart".to_string(),
                 },
-                layer: "Lineart".to_string(),
-            }, LayerEntry {
-                color: ColorMode::Static { r: 250.0, g: 150.0, b: 40.0 },
-                layer: "BaseColor".to_string()
-            }],
+                LayerEntry {
+                    color: ColorMode::Static {
+                        r: 250.0,
+                        g: 150.0,
+                        b: 40.0,
+                    },
+                    layer: "BaseColor".to_string(),
+                },
+            ],
             ha_address: "".to_string(),
             ha_key: "".to_string(),
         }
@@ -110,7 +117,10 @@ pub fn get_config_path() -> PathBuf {
         .or_else(|_| std::env::var("USERPROFILE"))
         .or_else(|_| std::env::var("HOMEPATH"))
         .expect("Home directory (HOME or USERPROFILE or HOMEPATH) should be defined");
-    PathBuf::from(home).join(".config").join("pet-app").join("config.toml")
+    PathBuf::from(home)
+        .join(".config")
+        .join("pet-app")
+        .join("config.toml")
 }
 
 pub fn load_or_create_config() -> Config {

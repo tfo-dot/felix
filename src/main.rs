@@ -7,17 +7,17 @@ mod ui;
 
 use config::{load_or_create_config, watch_config};
 use event::{AppEvent, InputEvent, TrayAction, WeatherCondition};
+#[cfg(target_os = "linux")]
+use gtk4_layer_shell::LayerShell;
 #[cfg(all(target_os = "linux", feature = "hyprland"))]
 use input::hyprland::{spawn_active_window_poller, spawn_cursor_poller, spawn_event_listener};
 use input::keyboard::spawn_keyboard_tracker;
-#[cfg(target_os = "linux")]
-use gtk4_layer_shell::LayerShell;
-#[cfg(not(target_os = "linux"))]
-use ui::window::LayerShell;
 use reqwest::Url;
 use reqwest::blocking::Client;
 use state::{PetAnimationState, PetState, PomodoroState, PomodoroTimer};
 use ui::tray::spawn_tray;
+#[cfg(not(target_os = "linux"))]
+use ui::window::LayerShell;
 use ui::window::PetWindow;
 
 use gtk4::prelude::*;
@@ -26,6 +26,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::ui::window::PropId;
+use futures::executor::block_on;
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -91,46 +92,132 @@ fn main() {
             let mut last_weather_fetch = Instant::now() - Duration::from_secs(1800);
 
             loop {
-                let mut is_playing = false;
-                let mut track_info = String::new();
-
-                if let Ok(out) = std::process::Command::new("playerctl")
-                    .args(&["-a", "metadata", "--format", "{{ status }}|||{{ artist }} - {{ title }}"])
-                    .output()
+        #[cfg(not(target_os = "windows"))]
                 {
-                    let stdout_str = String::from_utf8_lossy(&out.stdout);
-                    for line in stdout_str.lines() {
-                        let parts: Vec<&str> = line.split("|||").collect();
-                        if parts.len() == 2 {
-                            let status = parts[0].trim().to_lowercase();
-                            let meta = parts[1].trim();
-                            if status.contains("playing") {
-                                is_playing = true;
-                                let cleaned = meta.replace(" - ", "").replace("-", "").trim().to_string();
-                                if !cleaned.is_empty() && meta != "-" && meta != " - " {
-                                    track_info = meta.to_string();
+                            let mut is_playing = false;
+                            let mut track_info = String::new();
+
+                            if let Ok(out) = std::process::Command::new("playerctl")
+                                .args(&["-a", "metadata", "--format", "{{ status }}|||{{ artist }} - {{ title }}"])
+                                .output()
+                            {
+                                let stdout_str = String::from_utf8_lossy(&out.stdout);
+                                for line in stdout_str.lines() {
+                                    let parts: Vec<&str> = line.split("|||").collect();
+                                    if parts.len() == 2 {
+                                        let status = parts[0].trim().to_lowercase();
+                                        let meta = parts[1].trim();
+                                        if status.contains("playing") {
+                                            is_playing = true;
+                                            let cleaned = meta.replace(" - ", "").replace("-", "").trim().to_string();
+                                            if !cleaned.is_empty() && meta != "-" && meta != " - " {
+                                                track_info = meta.to_string();
+                                            }
+                                        }
+                                    }
                                 }
+                            }
+
+                            if is_playing {
+                                if track_info.is_empty() {
+                                    track_info = "Music".to_string();
+                                }
+
+                                if track_info != last_track {
+                                    last_track = track_info.clone();
+                                    let _ = tx_media.send(AppEvent::TrackChanged(track_info));
+                                }
+                            } else {
+                                if !last_track.is_empty() {
+                                    last_track.clear();
+                                    let _ = tx_media.send(AppEvent::TrackChanged(String::new()));
+                                }
+                            }
+                        }
+
+                            #[cfg(target_os = "windows")]{
+                            use windows::core::Result;
+use windows::Media::Control::{
+    GlobalSystemMediaTransportControlsSessionManager,
+    GlobalSystemMediaTransportControlsSessionPlaybackStatus,
+};
+
+    // println!("Setting up media control");
+
+    // let manager_future = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
+    //     .expect("Failed to request manager");
+    
+    // // 2. Block this background thread until the future resolves
+    // let manager_result = block_on(manager_future);
+
+    // // let manager = (GlobalSystemMediaTransportControlsSessionManager::RequestAsync().expect("").await).expect("");
+
+    
+    // // GetCurrentSession returns Ok(session) if a media app is active, 
+    // // or an Err if absolutely nothing is registered in the SMTC right now.
+    // if let Ok(session) = manager_result.GetCurrentSession() {
+    //     // let properties = (session.TryGetMediaPropertiesAsync().expect("").await).expect("");
+
+    //     if let Ok(props_future) = session.TryGetMediaPropertiesAsync() {
+
+    //         if let Ok(properties) = block_on(props_future) {
+
+    //     let title = properties.Title().expect("");
+    //     let artist = properties.Artist().expect("");
+        
+    //     // title and artist are HSTRINGs, so we convert them to Rust Strings
+    //     let title_str = title.to_string_lossy();
+    //     let artist_str = artist.to_string_lossy();
+        
+    //     if title_str.is_empty() && artist_str.is_empty() {
+    //         let _ = tx_media.send(AppEvent::TrackChanged(String::new()));
+    //     } else {
+    //     let track_info = format!("{} - {}", artist_str, title_str);
+    //     let _ = tx_media.send(AppEvent::TrackChanged(track_info));
+        
+    //     }
+    //     }
+    // }
+    // } else {
+    //     let _ = tx_media.send(AppEvent::TrackChanged(String::new()));
+    // }
+
+    let currently_playing = block_on(async {
+        let mut result = String::from("");
+
+        // 1. Request the manager and .await it
+        // (RequestAsync returns a Result<IAsyncOperation>, so we unwrap/handle the Result, then await)
+        if let Ok(manager_op) = GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
+            if let Ok(manager) = manager_op.await {
+                
+                // 2. Get the current session
+                if let Ok(session) = manager.GetCurrentSession() {
+                    
+                    // 3. Request properties and .await them
+                    if let Ok(props_op) = session.TryGetMediaPropertiesAsync() {
+                        if let Ok(properties) = props_op.await {
+                            
+                            // Extract the text
+                            let title = properties.Title().unwrap_or_default().to_string_lossy();
+                            let artist = properties.Artist().unwrap_or_default().to_string_lossy();
+                            
+                            if !title.is_empty() || !artist.is_empty() {
+                                result = format!("{} - {}", artist, title);
                             }
                         }
                     }
                 }
+            }
+        }
+        
+        result
+    });
 
-                if is_playing {
-                    if track_info.is_empty() {
-                        track_info = "Music".to_string();
-                    }
-
-                    if track_info != last_track {
-                        last_track = track_info.clone();
-                        let _ = tx_media.send(AppEvent::TrackChanged(track_info));
-                    }
-                } else {
-                    if !last_track.is_empty() {
-                        last_track.clear();
-                        let _ = tx_media.send(AppEvent::TrackChanged(String::new()));
-                    }
-                }
-
+            if last_track != currently_playing {
+                last_track = currently_playing.clone();
+                let _ = tx_media.send(AppEvent::TrackChanged(currently_playing));
+            }
+}
                 if ha_addres.read().is_ok_and(|r| !r.is_empty()) {
                     if last_weather_fetch.elapsed() > Duration::from_secs(600) {
                         let url = Url::parse(&ha_addres_poller.read().unwrap()).expect("The HA url should be valid url if provided");
@@ -569,16 +656,49 @@ fn main() {
 
                         let monitor = target_monitor;
 
-                        let geom = monitor.geometry();
-                        let m_x = geom.x() as f64;
-                        let m_y = geom.y() as f64;
-                        let m_w = geom.width() as f64;
-                        let m_h = geom.height() as f64;
+let geom = monitor.geometry();
+let m_x = geom.x() as f64;
+let m_y = geom.y() as f64;
+let m_w = geom.width() as f64;
+let m_h = geom.height() as f64;
 
-                        // Set the window monitor
-                        pet_window_clone.window.set_monitor(Some(&monitor));
+// 1. Wayland / Linux Flow
+#[cfg(unix)]
+{
+    // This works perfectly on Linux/Wayland compositors
+    pet_window_clone.window.set_monitor(Some(&monitor));
+}
 
-                        let pet_size = current_config.pet.size;
+// 2. Windows Flow
+#[cfg(windows)]
+{
+    use gtk4::prelude::*;
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOP, SWP_NOSIZE, SWP_NOZORDER};
+    use windows::Win32::Foundation::HWND;
+
+    // Grab the native Windows Handle (HWND) from the GTK surface
+    if let Some(surface) = pet_window_clone.window.surface() {
+        if let Ok(win32_surface) = surface.downcast::<gdk4_win32::Win32Surface>() {
+             let raw_hwnd = win32_surface.handle();
+            let hwnd = HWND(raw_hwnd.0 as *mut _);
+
+            // Move the window directly to the new monitor's coordinates
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOP),
+                    m_x as i32,
+                    m_y as i32,
+                    0, // Width (Ignored by SWP_NOSIZE)
+                    0, // Height (Ignored by SWP_NOSIZE)
+                    SWP_NOSIZE | SWP_NOZORDER,
+                );
+            }
+        }
+    }
+}
+
+let pet_size = current_config.pet.size;
 
                         // Classify active window into corresponding ActiveProp
                         let mut active_prop = ui::window::ActiveProp::None;
@@ -873,7 +993,7 @@ fn main() {
 
                                             app.particle_config.range[idx as usize]
                                         };
-                                        
+
                                             particles.push(ui::window::PropParticle {
                                                 x: px,
                                                 y: py,

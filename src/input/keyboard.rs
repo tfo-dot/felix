@@ -1,6 +1,6 @@
+use crate::event::{AppEvent, InputEvent};
 #[cfg(target_os = "linux")]
 use evdev::{Device, KeyCode};
-use crate::event::{AppEvent, InputEvent};
 use std::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
@@ -76,5 +76,7 @@ pub fn spawn_keyboard_tracker(tx: Sender<AppEvent>) {
 
 #[cfg(not(target_os = "linux"))]
 pub fn spawn_keyboard_tracker(_tx: Sender<AppEvent>) {
-    log::warn!("Keyboard tracking is not supported on this platform. Typing animations will be disabled.");
+    log::warn!(
+        "Keyboard tracking is not supported on this platform. Typing animations will be disabled."
+    );
 }

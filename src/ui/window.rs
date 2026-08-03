@@ -263,17 +263,51 @@ impl PetWindow {
             }
             #[cfg(target_os = "windows")]
             {
-                let title: Vec<u16> = "Felix Desktop Pet\0".encode_utf16().collect();
-                unsafe {
-                    use windows_sys::Win32::UI::WindowsAndMessaging::*;
-                    let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
-                    if hwnd != 0 {
-                        let mut style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-                        style |= WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
-                        SetWindowLongW(hwnd, GWL_EXSTYLE, style as i32);
-                        
-                        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, 
-                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+                use windows::Win32::Foundation::HWND;
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    GWL_EXSTYLE, GetWindowLongPtrW, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+                    SWP_NOMOVE, SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos, WS_EX_NOACTIVATE,
+                    WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+                };
+
+                if let Some(surface) = window.surface() {
+                    if let Ok(win32_surface) = surface.downcast::<gdk4_win32::Win32Surface>() {
+                        let raw_hwnd = win32_surface.handle(); // whatever int/ptr type gdk4-win32 gives you
+                        let hwnd = HWND(raw_hwnd.0 as *mut _);
+
+                        unsafe {
+                            let mut style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+                            style |= (WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TOOLWINDOW).0;
+                            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style as isize);
+
+                            let _ = SetWindowPos(
+                                hwnd,
+                                Some(HWND_TOPMOST),
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                            );
+                        }
+
+                        gtk4::glib::timeout_add_local(
+                            std::time::Duration::from_secs(2),
+                            move || {
+                                unsafe {
+                                    let _ = SetWindowPos(
+                                        hwnd,
+                                        Some(HWND_TOPMOST),
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                                    );
+                                }
+                                gtk4::glib::ControlFlow::Continue
+                            },
+                        );
                     }
                 }
             }
@@ -1124,13 +1158,59 @@ impl PetWindow {
 }
 
 pub fn update_window_properties(window: &gtk4::ApplicationWindow, config: &Config) {
-    window.set_anchor(Edge::Bottom, config.anchor.edge_bottom);
-    window.set_anchor(Edge::Right, config.anchor.edge_right);
-    window.set_anchor(Edge::Top, config.anchor.edge_top);
-    window.set_anchor(Edge::Left, config.anchor.edge_left);
+    // window.set_anchor(Edge::Bottom, config.anchor.edge_bottom);
+    // window.set_anchor(Edge::Right, config.anchor.edge_right);
+    // window.set_anchor(Edge::Top, config.anchor.edge_top);
+    // window.set_anchor(Edge::Left, config.anchor.edge_left);
 
-    window.set_margin(Edge::Bottom, config.anchor.margin_bottom);
-    window.set_margin(Edge::Right, config.anchor.margin_right);
-    window.set_margin(Edge::Top, config.anchor.margin_top);
-    window.set_margin(Edge::Left, config.anchor.margin_left);
+    // window.set_margin(Edge::Bottom, config.anchor.margin_bottom);
+    // window.set_margin(Edge::Right, config.anchor.margin_right);
+    // window.set_margin(Edge::Top, config.anchor.margin_top);
+    // window.set_margin(Edge::Left, config.anchor.margin_left);
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::{HWND, RECT};
+        use windows::Win32::Graphics::Gdi::{
+            GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetWindowRect, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOSIZE, SetWindowPos,
+        };
+
+        if let Some(surface) = window.surface() {
+            if let Ok(win32_surface) = surface.downcast::<gdk4_win32::Win32Surface>() {
+                let raw_hwnd = win32_surface.handle();
+                let hwnd = HWND(raw_hwnd.0 as *mut _);
+
+                unsafe {
+                    let mut window_rect = RECT::default();
+                    let _ = GetWindowRect(hwnd, &mut window_rect);
+                    let win_w = window_rect.right - window_rect.left;
+                    let win_h = window_rect.bottom - window_rect.top;
+
+                    let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                    let mut mi = MONITORINFO {
+                        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                        ..Default::default()
+                    };
+                    if GetMonitorInfoW(monitor, &mut mi).as_bool() {
+                        let work_area = mi.rcWork;
+                        let x = work_area.right - win_w - 20;
+                        let y = work_area.bottom - win_h - 20;
+
+                        let _ = SetWindowPos(
+                            hwnd,
+                            Some(HWND_TOPMOST),
+                            x,
+                            y,
+                            0,
+                            0,
+                            SWP_NOSIZE | SWP_NOACTIVATE,
+                        );
+                    }
+                }
+            }
+        }
+    }
 }

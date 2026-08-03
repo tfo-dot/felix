@@ -16,7 +16,7 @@ impl PetTray {
 }
 
 #[cfg(target_os = "linux")]
-use ksni::{menu::StandardItem, MenuItem, ToolTip, Tray};
+use ksni::{MenuItem, ToolTip, Tray, menu::StandardItem};
 
 #[cfg(target_os = "linux")]
 impl Tray for PetTray {
@@ -95,9 +95,9 @@ impl Tray for PetTray {
 }
 
 #[cfg(target_os = "windows")]
-use windows_sys::Win32::Foundation::HWND;
-#[cfg(target_os = "windows")]
 use std::sync::Mutex;
+#[cfg(target_os = "windows")]
+use windows::Win32::Foundation::HWND;
 
 pub struct TrayHandle {
     #[cfg(target_os = "linux")]
@@ -112,7 +112,12 @@ pub struct TrayHandle {
 static STATUS_TEXT: Mutex<String> = Mutex::new(String::new());
 
 #[cfg(target_os = "windows")]
-static TRAY_HWND: Mutex<HWND> = Mutex::new(0);
+struct SendHwnd(HWND);
+unsafe impl Send for SendHwnd {}
+unsafe impl Sync for SendHwnd {}
+
+#[cfg(target_os = "windows")]
+static TRAY_HWND: Mutex<SendHwnd> = Mutex::new(SendHwnd(HWND(core::ptr::null_mut())));
 
 #[cfg(target_os = "windows")]
 static TRAY_TX: Mutex<Option<Sender<AppEvent>>> = Mutex::new(None);
@@ -124,7 +129,7 @@ impl TrayHandle {
     {
         #[cfg(target_os = "linux")]
         self.handle.update(f);
-        
+
         #[cfg(target_os = "windows")]
         {
             let mut tray = PetTray {
@@ -133,17 +138,16 @@ impl TrayHandle {
             };
             f(&mut tray);
             *STATUS_TEXT.lock().unwrap() = tray.status_text.clone();
-            
-            let hwnd = *TRAY_HWND.lock().unwrap();
-            if hwnd != 0 {
-                unsafe {
-                    windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(
-                        hwnd,
-                        windows_sys::Win32::UI::WindowsAndMessaging::WM_USER + 2,
-                        0,
-                        0,
-                    );
-                }
+
+            let guard = TRAY_HWND.lock().unwrap();
+            let hwnd = guard.0;
+            unsafe {
+                windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                    Some(hwnd),
+                    windows::Win32::UI::WindowsAndMessaging::WM_USER + 2,
+                    windows::Win32::Foundation::WPARAM(0),
+                    windows::Win32::Foundation::LPARAM(0),
+                );
             }
         }
 
@@ -165,67 +169,66 @@ pub fn spawn_tray(tx: Sender<AppEvent>) -> TrayHandle {
 #[cfg(target_os = "windows")]
 pub fn spawn_tray(tx: Sender<AppEvent>) -> TrayHandle {
     use std::thread;
-    use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::Foundation::HINSTANCE;
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::*;
+    use windows::core::PCWSTR;
 
     *TRAY_TX.lock().unwrap() = Some(tx.clone());
 
-    let (tx_hwnd, rx_hwnd) = std::sync::mpsc::channel::<HWND>();
+    let (tx_hwnd, rx_hwnd) = std::sync::mpsc::channel::<SendHwnd>();
 
     thread::spawn(move || unsafe {
-        let hinstance = GetModuleHandleW(std::ptr::null());
+        let hinstance: Option<HINSTANCE> = GetModuleHandleW(None).map(|h| HINSTANCE(h.0)).ok();
+
         let class_name: Vec<u16> = "FelixTrayClass\0".encode_utf16().collect();
 
         let wnd_class = WNDCLASSW {
-            style: 0,
+            style: windows::Win32::UI::WindowsAndMessaging::WNDCLASS_STYLES(0),
             lpfnWndProc: Some(tray_wnd_proc),
             cbClsExtra: 0,
             cbWndExtra: 0,
-            hInstance: hinstance,
-            hIcon: 0,
-            hCursor: 0,
-            hbrBackground: 0,
-            lpszMenuName: std::ptr::null(),
-            lpszClassName: class_name.as_ptr(),
+            hInstance: hinstance.unwrap(),
+            hIcon: windows::Win32::UI::WindowsAndMessaging::HICON(core::ptr::null_mut()),
+            hCursor: windows::Win32::UI::WindowsAndMessaging::HCURSOR(core::ptr::null_mut()),
+            hbrBackground: windows::Win32::Graphics::Gdi::HBRUSH(core::ptr::null_mut()),
+            lpszMenuName: PCWSTR::from_raw(std::ptr::null()),
+            lpszClassName: PCWSTR::from_raw(class_name.as_ptr()),
         };
 
         RegisterClassW(&wnd_class);
 
         let hwnd = CreateWindowExW(
-            0,
-            class_name.as_ptr(),
-            std::ptr::null(),
-            0,
-            0,
-            0,
+            windows::Win32::UI::WindowsAndMessaging::WINDOW_EX_STYLE(0),
+            PCWSTR::from_raw(class_name.as_ptr()),
+            PCWSTR::from_raw(std::ptr::null()),
+            windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(0),
             0,
             0,
             0,
             0,
+            None,
+            None,
             hinstance,
-            std::ptr::null(),
-        );
+            Some(std::ptr::null()),
+        )
+        .expect("Failed to create window");
 
-        if hwnd == 0 {
-            log::error!("Failed to create helper window for Win32 system tray");
-            return;
-        }
-
-        *TRAY_HWND.lock().unwrap() = hwnd;
+        *TRAY_HWND.lock().unwrap() = SendHwnd(hwnd);
 
         let nid = get_notify_icon_data(hwnd);
-        windows_sys::Win32::UI::Shell::Shell_NotifyIconW(windows_sys::Win32::UI::Shell::NIM_ADD, &nid);
+        windows::Win32::UI::Shell::Shell_NotifyIconW(windows::Win32::UI::Shell::NIM_ADD, &nid);
 
-        let _ = tx_hwnd.send(hwnd);
+        let _ = tx_hwnd.send(SendHwnd(hwnd));
 
         let mut msg: MSG = std::mem::zeroed();
-        while GetMessageW(&mut msg, 0, 0, 0) > 0 {
+        while GetMessageW(&mut msg, Some(hwnd), 0, 0).0 > 0 {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
     });
 
-    let hwnd = rx_hwnd.recv().unwrap_or(0);
+    let hwnd = rx_hwnd.recv().unwrap().0;
     TrayHandle { hwnd, tx }
 }
 
@@ -235,16 +238,16 @@ pub fn spawn_tray(_tx: Sender<AppEvent>) -> TrayHandle {
 }
 
 #[cfg(target_os = "windows")]
-unsafe fn get_notify_icon_data(hwnd: HWND) -> windows_sys::Win32::UI::Shell::NOTIFYICONDATAW {
-    use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    use windows_sys::Win32::UI::Shell::*;
+unsafe fn get_notify_icon_data(hwnd: HWND) -> windows::Win32::UI::Shell::NOTIFYICONDATAW {
+    use windows::Win32::UI::Shell::*;
+    use windows::Win32::UI::WindowsAndMessaging::*;
     let mut nid: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
     nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
     nid.hWnd = hwnd;
     nid.uID = 1;
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     nid.uCallbackMessage = WM_USER + 1;
-    nid.hIcon = unsafe { LoadIconW(0, IDI_APPLICATION) };
+    nid.hIcon = unsafe { LoadIconW(None, IDI_APPLICATION).expect("Shouldnt be empty") };
 
     let title = "Felix Desktop Pet";
     let wtitle: Vec<u16> = title.encode_utf16().collect();
@@ -257,7 +260,7 @@ unsafe fn get_notify_icon_data(hwnd: HWND) -> windows_sys::Win32::UI::Shell::NOT
 
 #[cfg(target_os = "windows")]
 unsafe fn update_tray_tooltip(hwnd: HWND) {
-    use windows_sys::Win32::UI::Shell::*;
+    use windows::Win32::UI::Shell::*;
     let mut nid = unsafe { get_notify_icon_data(hwnd) };
     let status = STATUS_TEXT.lock().unwrap().clone();
     if status.is_empty() {
@@ -272,32 +275,50 @@ unsafe fn update_tray_tooltip(hwnd: HWND) {
 }
 
 #[cfg(target_os = "windows")]
-unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, msg: u32, wparam: windows_sys::Win32::Foundation::WPARAM, lparam: windows_sys::Win32::Foundation::LPARAM) -> windows_sys::Win32::Foundation::LRESULT {
-    use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    use windows_sys::Win32::UI::Shell::*;
-    use windows_sys::Win32::Foundation::POINT;
+unsafe extern "system" fn tray_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::Shell::*;
+    use windows::Win32::UI::WindowsAndMessaging::*;
+    use windows::core::PCWSTR;
+
     match msg {
         1025 => {
-            let event = lparam as u32;
+            let event = lparam.0 as u32;
             if event == WM_RBUTTONUP {
                 let mut pos = POINT { x: 0, y: 0 };
                 unsafe { GetCursorPos(&mut pos) };
 
-                let menu = unsafe { CreatePopupMenu() };
+                let menu = unsafe { CreatePopupMenu() }.expect("Should be valid");
                 let add_menu_item = |id: usize, text: &str| {
-                    let wtext: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
-                    unsafe { AppendMenuW(menu, MF_STRING, id, wtext.as_ptr()) };
+                    let wtext: Vec<u16> = text.encode_utf16().collect();
+                    unsafe { AppendMenuW(menu, MF_STRING, id, PCWSTR::from_raw(wtext.as_ptr())) };
                 };
 
-                add_menu_item(1, "Toggle Pomodoro Pause");
-                add_menu_item(2, "Reset Pomodoro");
-                add_menu_item(3, "Reload Config");
-                add_menu_item(4, "Toggle visibility");
-                unsafe { AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null()) };
-                add_menu_item(5, "Quit");
+                add_menu_item(1, "Toggle Pomodoro Pause\0");
+                add_menu_item(2, "Reset Pomodoro\0");
+                add_menu_item(3, "Reload Config\0");
+                add_menu_item(4, "Toggle visibility\0");
+                unsafe { AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::from_raw(std::ptr::null())) };
+                add_menu_item(5, "Quit\0");
 
                 unsafe { SetForegroundWindow(hwnd) };
-                let selected = unsafe { TrackPopupMenu(menu, TPM_RETURNCMD, pos.x, pos.y, 0, hwnd, std::ptr::null()) };
+                let selected = unsafe {
+                    TrackPopupMenu(
+                        menu,
+                        TPM_RETURNCMD,
+                        pos.x,
+                        pos.y,
+                        Some(0),
+                        hwnd,
+                        Some(std::ptr::null()),
+                    )
+                }
+                .0;
                 unsafe { DestroyMenu(menu) };
 
                 if selected > 0 {
@@ -320,17 +341,17 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, msg: u32, wparam: windows_sy
                     let _ = tx.send(AppEvent::Tray(TrayAction::TogglePetVisibility));
                 }
             }
-            0
+            windows::Win32::Foundation::LRESULT(0)
         }
         1026 => {
             unsafe { update_tray_tooltip(hwnd) };
-            0
+            windows::Win32::Foundation::LRESULT(0)
         }
         WM_DESTROY => {
             let nid = unsafe { get_notify_icon_data(hwnd) };
             unsafe { Shell_NotifyIconW(NIM_DELETE, &nid) };
             unsafe { PostQuitMessage(0) };
-            0
+            windows::Win32::Foundation::LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
